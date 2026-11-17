@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { SizeGuide } from "./SizeGuide";
 import SiteFooter from "./SiteFooter";
+import { useSiteSettings } from "../data/siteSettings";
+import { assetUrl } from "../utils/router";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 
@@ -74,7 +76,7 @@ function SystemBlock() {
           >
             <div className="rounded-3xl overflow-hidden border border-white/10 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
               <img
-                src="images/grilyato-detail.jpg"
+                src={assetUrl("images/grilyato-detail.jpg")}
                 alt="Профиль Грильято крупным планом"
                 className="w-full h-[380px] lg:h-[520px] object-cover"
               />
@@ -127,9 +129,11 @@ function SystemBlock() {
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Компоненты SystemBlock и SiteFooter.
  * КАК ИЗМЕНИТЬ: Не требует изменений. */
 export default function Sections() {
+  /* Блок «О системе Грильято» скрывается переключателем в админке; подвал выводится всегда */
+  const aboutVisible = useSiteSettings().aboutVisible.grilyato;
   return (
     <>
-      <SystemBlock />
+      {aboutVisible && <SystemBlock />}
       <SiteFooter />
     </>
   );

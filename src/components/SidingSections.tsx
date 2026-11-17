@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { SIDING_ELEMENTS } from "../data/siding";
 import SiteFooter from "./SiteFooter";
+import { useSiteSettings } from "../data/siteSettings";
+import { assetUrl } from "../utils/router";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 
@@ -108,7 +110,7 @@ function SidingSystemBlock() {
           >
             <div className="overflow-hidden rounded-3xl border border-white/10 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
               <img
-                src="images/siding-detail.jpg"
+                src={assetUrl("images/siding-detail.jpg")}
                 alt="ПВХ сайдинг крупным планом"
                 className="h-[380px] w-full object-cover lg:h-[520px]"
               />
@@ -191,9 +193,11 @@ function SidingSystemBlock() {
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Компоненты SidingSystemBlock и SiteFooter.
  * КАК ИЗМЕНИТЬ: Не требует изменений. */
 export default function SidingSections() {
+  /* Блок «О сайдинге» скрывается переключателем в админке; подвал выводится всегда */
+  const aboutVisible = useSiteSettings().aboutVisible.siding;
   return (
     <>
-      <SidingSystemBlock />
+      {aboutVisible && <SidingSystemBlock />}
       <SiteFooter />
     </>
   );

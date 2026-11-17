@@ -1,7 +1,9 @@
 /* ============================================================================
- * ФАЙЛ: src/components/TestSidingCalculator.tsx — Калькулятор ПВХ сайдинга для страницы «Сайдинг».
+ * ФАЙЛ: src/components/TestSidingCalculator.tsx — Калькулятор ПВХ сайдинга для страниц «Сайдинг» и «Тест».
  * ЗА ЧТО ОТВЕЧАЕТ: Общий компонент расчёта фасада, планов, раскроя, печати и спецификации.
- *   Используется на странице «Сайдинг» через SidingCalculator.tsx. Страница «Тест» сейчас показывает заглушку.
+ *   Используется на странице «Сайдинг» через SidingCalculator.tsx и на странице «Тест» напрямую (src/pages/TestPage.tsx).
+ *   Чем страницы отличаются (стартовый фасад без окон и дверей, кнопка «От центра», закреплённый «План фасада») —
+ *   перечислено в VARIANT_FEATURES ниже; там же эти отличия можно включить и для страницы «Сайдинг».
  *   Режимы: обычный фасад, фасад с фронтоном, отдельный фронтон и 3D. Геометрия фронтонов и раскрой находятся в src/data/testFacade.ts.
  *   В режиме 3D доступны изометрия и вид сверху с размерами дома и настройками кровли.
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Вся математика раскроя, габариты элементов и стартовый пример приходят из src/data/siding.ts, сохранённый ввод пользователя — из localStorage ("test:siding-input", отдельно от страницы «Сайдинг»), стартовые значения и цвета — из настроек страницы «Сайдинг» в админке, печать — из src/utils/printSidingLayout.ts, полноэкранное окно плана — из src/components/SidingPlanLightbox.tsx.
@@ -10,13 +12,15 @@
  *   — Подписи кнопок, заголовки блоков, цвета линий на плане фасада и колонки таблицы меняются в блоках ниже.
  * ========================================================================= */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import {
   AppWindow,
   Box,
   ChevronDown,
   DoorOpen,
+  Maximize2,
+  Minimize2,
   LayoutGrid,
   MoveHorizontal,
   MoveVertical,
@@ -80,6 +84,7 @@ import {
   saveTestFacade,
   clampGableOpening,
   withStandardFacadeColors,
+  TEST_H_PROFILE_PLACEMENTS,
   type BrokenGableParameters,
   type GableType,
   type HProfilePlacement,
@@ -101,7 +106,9 @@ const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const fmt2 = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const m2 = (v: number) => fmt2.format(Math.round(v * 100) / 100);
 
-function loadInput(storageKey: string = TEST_STORAGE_KEY): SidingInput {
+function loadInput(storageKey: string = TEST_STORAGE_KEY, withDefaultOpenings: boolean = true): SidingInput {
+  /* Стартовые проёмы: на странице «Сайдинг» — окно и дверь из DEFAULT_SIDING, на странице «Тест» — фасад без проёмов */
+  const defaultOpenings = withDefaultOpenings ? DEFAULT_SIDING.openings : [];
   try {
     const raw = localStorage.getItem(storageKey);
     /* Новый посетитель: стартовый фасад из админки («Настройка страниц» → «Сайдинг») */
@@ -120,7 +127,7 @@ function loadInput(storageKey: string = TEST_STORAGE_KEY): SidingInput {
         rightEdge: start.rightEdge,
         /* Режим «Один цвет» отключён — кнопка на странице «Тест» убрана */
         singleColor: false,
-        openings: DEFAULT_SIDING.openings.map((o) => clampOpening(o, start.facadeLength, start.facadeHeight)),
+        openings: defaultOpenings.map((o) => clampOpening(o, start.facadeLength, start.facadeHeight)),
       });
     }
     const parsed = JSON.parse(raw) as Partial<SidingInput>;
@@ -133,14 +140,14 @@ function loadInput(storageKey: string = TEST_STORAGE_KEY): SidingInput {
         typeof parsed.sparePct === "number" && parsed.sparePct >= 0 && parsed.sparePct <= 50
           ? parsed.sparePct
           : DEFAULT_SIDING.sparePct,
-      openings: Array.isArray(parsed.openings) ? parsed.openings : DEFAULT_SIDING.openings,
+      openings: Array.isArray(parsed.openings) ? parsed.openings : defaultOpenings,
       colorId: getSidingPanelColor(String(parsed.colorId ?? "")).id,
       trimColors: normalizeTrimColors(parsed.trimColors),
       /* Режим «Один цвет» отключён — кнопка на странице «Тест» убрана */
       singleColor: false,
     };
   } catch {
-    return DEFAULT_SIDING;
+    return { ...DEFAULT_SIDING, openings: defaultOpenings };
   }
 }
 
@@ -311,12 +318,15 @@ function FacadeScheme({
   input,
   svgRef,
   seams,
+  dense = false,
 }: {
   calc: ReturnType<typeof calcSiding>;
   input: SidingInput;
   svgRef: React.RefObject<SVGSVGElement | null>;
   /** Позиции вертикальных стыков H-профиля в мм (см. src/data/testFacade.ts) */
   seams: number[];
+  /** Компактный вид: холст чертежа ниже, чтобы вокруг фасада не оставалось больших пустых полей */
+  dense?: boolean;
 }) {
   const color = getSidingPanelColor(input.colorId);
   const scheme = color.scheme;
@@ -328,11 +338,12 @@ function FacadeScheme({
   const edgeTone = (edge: EdgeTrim) =>
     getTrimColor(input, edge === "j" ? "jProfile" : edge === "inner" ? "innerCorner" : "outerCorner").scheme;
   const VIEW_W = 680;
-  const VIEW_H = 470;
-  const M_LEFT = 52;
+  /* В компактном виде холст чертежа обрезан по высоте: фасад занимает почти всю карточку */
+  const VIEW_H = dense ? 300 : 470;
+  const M_LEFT = dense ? 42 : 52;
   const M_RIGHT = 16;
-  const M_TOP = 18;
-  const M_BOTTOM = 54;
+  const M_TOP = dense ? 8 : 18;
+  const M_BOTTOM = dense ? 38 : 54;
 
   const Lm = calc.L / 1000;
   const Hm = calc.H / 1000;
@@ -583,13 +594,99 @@ function savePerTypeStore(store: PerTypeStore, storageKey: string = PER_TYPE_STO
 
 export type SidingCalculatorVariant = "test" | "siding";
 
-const CALCULATOR_STORAGE: Record<SidingCalculatorVariant, { input: string; perType: string; facade: string; planView: string; house: string }> = {
+/* БЛОК: Отличия страницы «Тест» от страницы «Сайдинг» (VARIANT_FEATURES)
+ * ЗА ЧТО ОТВЕЧАЕТ: Один и тот же калькулятор работает на двух страницах. Здесь перечислено, чем они отличаются:
+ *   defaultOpenings — стартовый фасад с окном и дверью (true) или пустой, без проёмов (false);
+ *   centerPlacement — показывать ли кнопку «От центра» в «Смещении H профиля»;
+ *   stickyPlan — закреплять ли блок «План фасада» (вместе с «Раскроем панелей» под ним) при прокрутке,
+ *     пока листается левая колонка с настройками («Итого материалы» и «Спецификация» идут ниже на всю ширину);
+ *   compact — доступен ли на странице переключатель «Компактно / Подробно»: в компактном виде меньше отступов,
+ *     мельче поля и цветовые кружки.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Задано прямо здесь; выбор «Компактно / Подробно» запоминается в localStorage.
+ * КАК ИЗМЕНИТЬ: Чтобы перенести новинку со страницы «Тест» на страницу «Сайдинг», поменяйте нужное значение
+ *   в строке siding на такое же, как в строке test. */
+const VARIANT_FEATURES: Record<
+  SidingCalculatorVariant,
+  { defaultOpenings: boolean; centerPlacement: boolean; stickyPlan: boolean; compact: boolean }
+> = {
+  test: { defaultOpenings: false, centerPlacement: true, stickyPlan: true, compact: true },
+  siding: { defaultOpenings: false, centerPlacement: true, stickyPlan: true, compact: true },
+};
+
+/* БЛОК: Одноразовая очистка сохранённых проёмов (clearSavedOpenings)
+ * ЗА ЧТО ОТВЕЧАЕТ: Стандартный фасад на страницах «Сайдинг» и «Тест» без окон и дверей. Чтобы это увидели и те,
+ *   кто открывал страницу раньше, сохранённые в браузере окна и двери один раз убираются у всех типов фасада.
+ *   Размеры, цвета и остальные настройки остаются; проёмы, добавленные после этого, сохраняются как обычно.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Ключи памяти страницы в localStorage и свой флаг storage.openingsCleared.
+ * КАК ИЗМЕНИТЬ: Чтобы очистка повторилась у всех посетителей, увеличьте OPENINGS_CLEARED_VERSION на 1. */
+const OPENINGS_CLEARED_VERSION = 1;
+
+function clearSavedOpenings(storage: { input: string; perType: string; openingsCleared: string }): void {
+  try {
+    if (Number(localStorage.getItem(storage.openingsCleared)) >= OPENINGS_CLEARED_VERSION) return;
+
+    const savedInput: unknown = JSON.parse(localStorage.getItem(storage.input) ?? "null");
+    if (savedInput && typeof savedInput === "object") {
+      localStorage.setItem(storage.input, JSON.stringify({ ...savedInput, openings: [] }));
+    }
+
+    const savedTypes: unknown = JSON.parse(localStorage.getItem(storage.perType) ?? "null");
+    if (savedTypes && typeof savedTypes === "object") {
+      const cleaned = Object.fromEntries(
+        Object.entries(savedTypes as Record<string, { input?: unknown } | null>).map(([type, snapshot]) => [
+          type,
+          snapshot && typeof snapshot === "object" && snapshot.input && typeof snapshot.input === "object"
+            ? { ...snapshot, input: { ...snapshot.input, openings: [] } }
+            : snapshot,
+        ]),
+      );
+      localStorage.setItem(storage.perType, JSON.stringify(cleaned));
+    }
+
+    localStorage.setItem(storage.openingsCleared, String(OPENINGS_CLEARED_VERSION));
+  } catch {}
+}
+
+/* БЛОК: Необязательная обёртка (OptionalDiv)
+ * ЗА ЧТО ОТВЕЧАЕТ: Оборачивает содержимое в <div> только там, где это нужно конкретной странице. Так страница
+ *   «Тест» получает свою раскладку (закреплённый план, результаты на всю ширину), а разметка страницы «Сайдинг»
+ *   остаётся в точности прежней.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Условие when и оформление className/style от места вызова.
+ * КАК ИЗМЕНИТЬ: Не требуется. */
+function OptionalDiv({
+  when,
+  className,
+  id,
+  style,
+  children,
+}: {
+  when: boolean;
+  className?: string;
+  id?: string;
+  style?: CSSProperties;
+  children: ReactNode;
+}) {
+  return when ? (
+    <div id={id} className={className} style={style}>
+      {children}
+    </div>
+  ) : (
+    <>{children}</>
+  );
+}
+
+const CALCULATOR_STORAGE: Record<
+  SidingCalculatorVariant,
+  { input: string; perType: string; facade: string; planView: string; house: string; compactView: string; openingsCleared: string }
+> = {
   test: {
     input: "test:siding-input",
     perType: "test:per-type",
     facade: "test:facade-shape",
     planView: "test:plan-view",
     house: "test:house-3d",
+    compactView: "test:compact-view",
+    openingsCleared: "test:openings-cleared",
   },
   siding: {
     input: "siding:input",
@@ -597,6 +694,8 @@ const CALCULATOR_STORAGE: Record<SidingCalculatorVariant, { input: string; perTy
     facade: "siding:facade-shape",
     planView: "siding:plan-view",
     house: "siding:house-3d",
+    compactView: "siding:compact-view",
+    openingsCleared: "siding:openings-cleared",
   },
 };
 
@@ -608,8 +707,52 @@ export default function TestSidingCalculator({
   variant?: SidingCalculatorVariant;
 }) {
   const storage = CALCULATOR_STORAGE[variant];
-  const [input, setInput] = useState<SidingInput>(() => loadInput(storage.input));
+  const features = VARIANT_FEATURES[variant];
+
+  /* БЛОК: Текущий вид калькулятора (compactView, dense, dc)
+   * ЗА ЧТО ОТВЕЧАЕТ: compactView — выбор пользователя («Компактно» / «Подробно»), dense — включён ли
+   *   уплотнённый вид именно сейчас, dc — помощник, который подставляет компактные классы отступов.
+   * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: localStorage (storage.compactView) и VARIANT_FEATURES выше.
+   * КАК ИЗМЕНИТЬ: Значения отступов и размеров — в парах классов dc("обычный", "компактный") в разметке ниже. */
+  const [compactView, setCompactView] = useState(() => {
+    try {
+      return localStorage.getItem(storage.compactView) !== "0";
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    if (!features.compact) return;
+    try {
+      localStorage.setItem(storage.compactView, compactView ? "1" : "0");
+    } catch {}
+  }, [features.compact, compactView, storage.compactView]);
+  const dense = features.compact && compactView;
+  const dc = (normal: string, compact: string) => (dense ? compact : normal);
+  const [input, setInput] = useState<SidingInput>(() => {
+    /* До чтения памяти один раз убираем сохранённые ранее стандартные окна и двери */
+    if (!features.defaultOpenings) clearSavedOpenings(storage);
+    return loadInput(storage.input, features.defaultOpenings);
+  });
   const [facadeSettings, setFacadeSettings] = useState<TestFacadeSettings>(() => loadTestFacade(storage.facade));
+
+  /* БЛОК: Отступ закреплённого «Плана фасада» от верха экрана (planStickyTop)
+   * ЗА ЧТО ОТВЕЧАЕТ: Измеряет настоящую высоту шапки сайта (она меняется на телефоне и при выключенной бегущей
+   *   строке), чтобы закреплённый план вставал ровно под шапкой с зазором 12 px и не прятался под неё.
+   * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Элемент <header> страницы; правила закрепления — класс .plan-sticky в src/index.css.
+   * КАК ИЗМЕНИТЬ: Зазор под шапкой — число PLAN_STICKY_GAP ниже. */
+  const PLAN_STICKY_GAP = 12;
+  const [planStickyTop, setPlanStickyTop] = useState(140 + PLAN_STICKY_GAP);
+  useEffect(() => {
+    if (!features.stickyPlan) return;
+    const header = document.querySelector("header");
+    if (!header) return;
+    const update = () => setPlanStickyTop(Math.round(header.getBoundingClientRect().height) + PLAN_STICKY_GAP);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [features.stickyPlan]);
   const [printError, setPrintError] = useState(false);
   const [planZoomed, setPlanZoomed] = useState(false);
   /* Режим блока «План фасада»: «Сторона 1» — обычный план фасада, «3D вид» — изометрия, «Вид сверху» — план с редактируемыми размерами дома */
@@ -734,7 +877,8 @@ export default function TestSidingCalculator({
         };
         return {
           ...withColors,
-          openings: [clampOpening(win, L, H), clampOpening(door, L, H)],
+          /* Страница «Тест»: стандартный фасад без окон и дверей (features.defaultOpenings = false) */
+          openings: features.defaultOpenings ? [clampOpening(win, L, H), clampOpening(door, L, H)] : [],
         };
       });
     }
@@ -753,7 +897,11 @@ export default function TestSidingCalculator({
         x: Math.round(Math.max(0, (w - 1) / 2) * 100) / 100,
         y: 0.3,
       };
-      setInput((previous) => ({ ...previous, openings: [g ? clampGableOpening(base, g, base) : base] }));
+      /* Страница «Тест»: стандартный фронтон без окна (features.defaultOpenings = false) */
+      setInput((previous) => ({
+        ...previous,
+        openings: features.defaultOpenings ? [g ? clampGableOpening(base, g, base) : base] : [],
+      }));
     }
     setPlanView("side1");
   };
@@ -962,33 +1110,54 @@ export default function TestSidingCalculator({
     <section
       id="calc"
       className={cn(
-        "scroll-mt-[130px] py-12 lg:py-16",
+        dc("scroll-mt-[130px] py-12 lg:py-16", "scroll-mt-[130px] py-5 lg:py-7"),
         background === "white" ? "bg-white" : "bg-smoke",
+        dense && "calc-dense",
       )}
     >
       <div className="mx-auto max-w-[1400px] px-4 lg:px-8">
-        {/* БЛОК: Заголовок калькулятора «Расчёт ПВХ сайдинга» | ЗА ЧТО ОТВЕЧАЕТ: Шапка раздела расчёта | ОТКУДА ДАННЫЕ: Задано здесь | КАК ИЗМЕНИТЬ: Поменяйте текст внутри <div> и <h2> */}
+        {/* БЛОК: Заголовок калькулятора и переключатель вида | ЗА ЧТО ОТВЕЧАЕТ: Шапка раздела расчёта. На странице «Тест» справа стоит кнопка «Компактно / Подробно» | КАК ИЗМЕНИТЬ: Текст заголовка — в <h2> */}
         <motion.div
           initial={{ opacity: 0, y: 22 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.65, ease }}
-          className="mb-8"
+          className={dc("mb-8", "mb-4")}
         >
-          <div className="mb-2 text-[12.5px] font-extrabold uppercase tracking-[0.18em] text-graphite/45">
-            Калькулятор · Фасад
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <div className={dc("mb-2 text-[12.5px]", "mb-1 text-[11px]") + " font-extrabold uppercase tracking-[0.18em] text-graphite/45"}>
+                Калькулятор · Фасад
+              </div>
+              <h2 className={dc("text-[32px] font-black leading-[1.02] tracking-[-0.01em] lg:text-[46px]", "text-[24px] font-black leading-[1.05] tracking-[-0.01em] lg:text-[30px]")}>
+                Расчёт ПВХ сайдинга
+              </h2>
+            </div>
+
+            {features.compact && (
+              <button
+                type="button"
+                onClick={() => setCompactView((v) => !v)}
+                aria-pressed={compactView}
+                title={compactView ? "Показать просторный вид с крупными полями" : "Убрать лишние отступы и сделать калькулятор компактнее"}
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-line bg-white px-3 text-[12px] font-extrabold text-graphite/70 transition-colors hover:border-graphite/40 hover:text-graphite"
+              >
+                {compactView ? <Maximize2 size={14} strokeWidth={2.4} /> : <Minimize2 size={14} strokeWidth={2.4} />}
+                {compactView ? "Подробно" : "Компактно"}
+              </button>
+            )}
           </div>
-          <h2 className="text-[32px] font-black leading-[1.02] tracking-[-0.01em] lg:text-[46px]">
-            Расчёт ПВХ сайдинга
-          </h2>
         </motion.div>
 
-        <div className="grid items-start gap-5 lg:grid-cols-[400px_minmax(0,1fr)] xl:grid-cols-[440px_minmax(0,1fr)]">
+        <div className={cn("grid items-start lg:grid-cols-[400px_minmax(0,1fr)] xl:grid-cols-[440px_minmax(0,1fr)]", dc("gap-5", "gap-3"))}>
           {/* БЛОК: Левая колонка — размеры фасада, запас %, верхняя планка, края и редактор проёмов | ЗА ЧТО ОТВЕЧАЕТ: Все элементы ввода пользователя | ОТКУДА ДАННЫЕ: Состояние input | КАК ИЗМЕНИТЬ: Стандартные размеры добавляемых окон/дверей меняются в createOpening() в src/data/siding.ts */}
           <motion.div
             initial={{ opacity: 0, y: 26 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, ease }}
-            className="space-y-6 rounded-3xl border border-line bg-white p-5 shadow-[0_2px_20px_rgba(20,25,27,0.05)] lg:p-6"
+            className={dc(
+              "space-y-6 rounded-3xl border border-line bg-white p-5 shadow-[0_2px_20px_rgba(20,25,27,0.05)] lg:p-6",
+              "space-y-3 rounded-2xl border border-line bg-white p-3 shadow-[0_2px_20px_rgba(20,25,27,0.05)] lg:p-4",
+            )}
           >
             {gableType && (
               <div>
@@ -1007,52 +1176,63 @@ export default function TestSidingCalculator({
 
             {/* БЛОК: Размеры фасада | Порядок: длина, общая высота (сразу под длиной), высота фасада,
                 высота фронтона, а для ломаного — излом и смещение вершины под высотой фронтона */}
-            {!standaloneGable && <div className="space-y-5 border-t border-line pt-5">
-              <div className="text-[12px] font-extrabold uppercase tracking-wider text-graphite/50">Размеры</div>
-              <SidingField
-                label="Длина фасада"
-                value={input.facadeLength}
-                onChange={(v) => set("facadeLength", Math.min(100, Math.max(0.5, v)))}
-                icon={MoveHorizontal}
-              />
-              {geometry && (
+            {!standaloneGable && <div className={dc("space-y-5 border-t border-line pt-5", "space-y-2 border-t border-line pt-3")}>
+              <div className={dc("text-[12px]", "text-[11px]") + " font-extrabold uppercase tracking-wider text-graphite/50"}>Размеры</div>
+              {/* В компактном виде поля размеров встают по два в ряд — блок занимает вдвое меньше места по высоте */}
+              <div className={cn(dense ? "grid grid-cols-2 gap-x-3 gap-y-2" : "space-y-5")}>
                 <SidingField
-                  label="Общая высота"
-                  value={geometry.totalHeight}
-                  onChange={(v) => patchGable({ height: Math.max(0.1, Math.min(20, v - geometry.wallHeight)) })}
-                  icon={MoveVertical}
+                  compact={dense}
+                  label="Длина фасада"
+                  value={input.facadeLength}
+                  onChange={(v) => set("facadeLength", Math.min(100, Math.max(0.5, v)))}
+                  icon={MoveHorizontal}
                 />
-              )}
-              <SidingField
-                label="Высота фасада"
-                value={input.facadeHeight}
-                onChange={(v) => set("facadeHeight", Math.min(100, Math.max(0.5, v)))}
-                icon={MoveVertical}
-              />
-              {geometry && (
-                <>
+                {geometry && (
                   <SidingField
-                    label="Высота фронтона"
-                    value={geometry.gableHeight}
-                    onChange={(v) => patchGable({ height: Math.max(0.1, Math.min(20, v)) })}
+                    compact={dense}
+                    label="Общая высота"
+                    value={geometry.totalHeight}
+                    onChange={(v) => patchGable({ height: Math.max(0.1, Math.min(20, v - geometry.wallHeight)) })}
                     icon={MoveVertical}
                   />
-                  {geometry.shape === "broken" && (
-                    <BreakControls
-                      geometry={geometry}
-                      onBreakHeight={(breakHeight) => patchGable({ breakHeight })}
-                      onBreakInset={(breakInset) => patchGable({ breakInset })}
+                )}
+                <SidingField
+                  compact={dense}
+                  label="Высота фасада"
+                  value={input.facadeHeight}
+                  onChange={(v) => set("facadeHeight", Math.min(100, Math.max(0.5, v)))}
+                  icon={MoveVertical}
+                />
+                {geometry && (
+                  <>
+                    <SidingField
+                      compact={dense}
+                      label="Высота фронтона"
+                      value={geometry.gableHeight}
+                      onChange={(v) => patchGable({ height: Math.max(0.1, Math.min(20, v)) })}
+                      icon={MoveVertical}
                     />
-                  )}
-                  <ApexOffsetControl
-                    geometry={geometry}
-                    onOffset={(apexOffset) => patchGable({ apexOffset })}
-                  />
-                </>
-              )}
+                    {geometry.shape === "broken" && (
+                      <div className={dense ? "col-span-2" : undefined}>
+                        <BreakControls
+                          geometry={geometry}
+                          onBreakHeight={(breakHeight) => patchGable({ breakHeight })}
+                          onBreakInset={(breakInset) => patchGable({ breakInset })}
+                        />
+                      </div>
+                    )}
+                    <div className={dense ? "col-span-2" : undefined}>
+                      <ApexOffsetControl
+                        geometry={geometry}
+                        onOffset={(apexOffset) => patchGable({ apexOffset })}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
               {/* Разделительная линия: под «Высота фасада» без фронтона, под «Смещение вершины» у фронтонов */}
-              <div className="border-t border-line pt-4">
-                <div className="text-[12px] font-extrabold uppercase tracking-wider text-graphite/50">Проёмы</div>
+              <div className={dc("border-t border-line pt-4", "border-t border-line pt-2")}>
+                <div className={dc("text-[12px]", "text-[11px]") + " font-extrabold uppercase tracking-wider text-graphite/50"}>Проёмы</div>
               </div>
             </div>}
 
@@ -1062,8 +1242,8 @@ export default function TestSidingCalculator({
                 ОТКУДА ДАННЫЕ: Массив input.openings (на фронтонах видны только окна) | КАК ИЗМЕНИТЬ: Размеры новых
                 проёмов при добавлении задаются в createOpening() в src/data/siding.ts */}
             <div>
-              <div className="mb-2.5 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-[13px] font-bold text-graphite/70">
+              <div className={dc("mb-2.5", "mb-1.5") + " flex items-center justify-between gap-2"}>
+                <div className={dc("text-[13px]", "text-[12px]") + " flex items-center gap-1.5 font-bold text-graphite/70"}>
                   <AppWindow size={14} strokeWidth={2.4} className="text-graphite/40" />
                   {standaloneGable ? "Окна" : "Окна и двери"}
                 </div>
@@ -1072,9 +1252,9 @@ export default function TestSidingCalculator({
                 </span>
               </div>
 
-              <div className="space-y-3">
+              <div className={dc("space-y-3", "space-y-2")}>
                 {(standaloneGable ? input.openings.filter((o) => o.kind === "window") : input.openings).map((o, i) => (
-                  <div key={o.id} className="rounded-2xl border border-line bg-smoke/40 p-3.5">
+                  <div key={o.id} className={dc("rounded-2xl border border-line bg-smoke/40 p-3.5", "rounded-xl border border-line bg-smoke/40 p-2.5")}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <span className="grid h-7 w-7 place-items-center rounded-lg bg-graphite text-[13px] font-black text-white">
@@ -1102,14 +1282,14 @@ export default function TestSidingCalculator({
                       </div>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-2 gap-2.5">
+                    <div className={dc("mt-3 grid grid-cols-2 gap-2.5", "mt-2 grid grid-cols-2 gap-2")}>
                       <SidingField compact label="Ширина" value={o.width} onChange={(v) => patchOpening(o.id, { width: v })} />
                       <SidingField compact label="Высота" value={o.height} onChange={(v) => patchOpening(o.id, { height: v })} />
                       <SidingField compact label={standaloneGable ? "От низа" : "От земли"} value={o.y} onChange={(v) => patchOpening(o.id, { y: v })} />
                     </div>
 
                     {/* БЛОК: Бегунок положения проёма по фасаду | ЗА ЧТО ОТВЕЧАЕТ: Перемещает окно или дверь вдоль стены — тот же бегунок, что «Смещение вершины»: ползунок, подписи слева/справа и кнопка «По центру» | ОТКУДА ДАННЫЕ: Поле o.x | КАК ИЗМЕНИТЬ: Шаг бегунка задаётся в атрибуте step (0,01 м) */}
-                    <div className="mt-3">
+                    <div className={dc("mt-3", "mt-2")}>
                       <div className="mb-1 text-[10.5px] font-bold uppercase tracking-wider text-graphite/45">
                         Положение по фасаду
                       </div>
@@ -1154,7 +1334,7 @@ export default function TestSidingCalculator({
                       </div>
                     </div>
 
-                    <div className="mt-3">
+                    <div className={dc("mt-3", "mt-2")}>
                       <div className="mb-1 text-[10.5px] font-bold uppercase tracking-wider text-graphite/45">
                         Обрамление проёма (3 стороны)
                       </div>
@@ -1188,22 +1368,22 @@ export default function TestSidingCalculator({
               </div>
 
               {standaloneGable ? (
-                <div className="mt-3">
+                <div className={dc("mt-3", "mt-2")}>
                   <button
                     type="button"
                     onClick={() => addOpening("window")}
-                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-graphite/30 px-3 py-2.5 text-[12.5px] font-extrabold text-graphite/70 transition-colors hover:border-pro hover:bg-pro/10 hover:text-graphite"
+                    className={dc("py-2.5", "py-2") + " inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-graphite/30 px-3 text-[12.5px] font-extrabold text-graphite/70 transition-colors hover:border-pro hover:bg-pro/10 hover:text-graphite"}
                   >
                     <Plus size={14} strokeWidth={2.6} />
                     Окно
                   </button>
                 </div>
               ) : (
-                <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className={dc("mt-3 grid grid-cols-2 gap-2", "mt-2 grid grid-cols-2 gap-2")}>
                   <button
                     type="button"
                     onClick={() => addOpening("window")}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-graphite/30 px-3 py-2.5 text-[12.5px] font-extrabold text-graphite/70 transition-colors hover:border-pro hover:bg-pro/10 hover:text-graphite"
+                    className={dc("py-2.5", "py-2") + " inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-graphite/30 px-3 text-[12.5px] font-extrabold text-graphite/70 transition-colors hover:border-pro hover:bg-pro/10 hover:text-graphite"}
                   >
                     <Plus size={14} strokeWidth={2.6} />
                     Окно
@@ -1211,7 +1391,7 @@ export default function TestSidingCalculator({
                   <button
                     type="button"
                     onClick={() => addOpening("door")}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-graphite/30 px-3 py-2.5 text-[12.5px] font-extrabold text-graphite/70 transition-colors hover:border-pro hover:bg-pro/10 hover:text-graphite"
+                    className={dc("py-2.5", "py-2") + " inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-graphite/30 px-3 text-[12.5px] font-extrabold text-graphite/70 transition-colors hover:border-pro hover:bg-pro/10 hover:text-graphite"}
                   >
                     <Plus size={14} strokeWidth={2.6} />
                     Дверь
@@ -1221,25 +1401,25 @@ export default function TestSidingCalculator({
             </div>
 
             {/* БЛОК: Выбор профилей для левой и правой стороны фасада — под блоком добавления окон и дверей | ЗА ЧТО ОТВЕЧАЕТ: J профиль, внутренний или наружный угол по краям стены | ОТКУДА ДАННЫЕ: Компонент EdgePicker выше | КАК ИЗМЕНИТЬ: Названия вариантов — в EDGE_OPTIONS */}
-            {!standaloneGable && <div className="space-y-4">
+            {!standaloneGable && <div className={dc("space-y-4", "space-y-2")}>
               {/* Разделительная линия под блоком окон и дверей и заголовок «Углы фасада» */}
-              <div className="border-t border-line pt-4">
-                <div className="text-[12px] font-extrabold uppercase tracking-wider text-graphite/50">Углы фасада</div>
+              <div className={dc("border-t border-line pt-4", "border-t border-line pt-2")}>
+                <div className={dc("text-[12px]", "text-[11px]") + " font-extrabold uppercase tracking-wider text-graphite/50"}>Углы фасада</div>
               </div>
               <EdgePicker title="Левая сторона фасада" value={input.leftEdge} onChange={(v) => set("leftEdge", v)} />
               <EdgePicker title="Правая сторона фасада" value={input.rightEdge} onChange={(v) => set("rightEdge", v)} />
             </div>}
 
             {/* БЛОК: Цвета материалов | ОТКУДА ДАННЫЕ: SIDING_TRIM_PARTS и каталог SIDING_PRODUCTS | КАК ИЗМЕНИТЬ: Товары и доступные оттенки задаются в src/data/sidingCatalog.ts. */}
-            <div className="mt-6 border-t border-line pt-5">
-              <div className="mb-2.5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-1.5 text-[13px] font-bold text-graphite/70">
+            <div className={dc("mt-6 border-t border-line pt-5", "mt-3 border-t border-line pt-3")}>
+              <div className={dc("mb-2.5", "mb-1.5") + " flex items-center justify-between gap-3"}>
+                <div className={dc("text-[13px]", "text-[12px]") + " flex items-center gap-1.5 font-bold text-graphite/70"}>
                   <Palette size={14} strokeWidth={2.4} className="text-graphite/40" />
                   Цвета
                 </div>
               </div>
 
-              <div className="space-y-1.5">
+              <div className={dc("space-y-1.5", "space-y-1")}>
                 {([
                   {
                     key: "siding",
@@ -1261,11 +1441,14 @@ export default function TestSidingCalculator({
                 ]).map((row) => (
                   <div
                     key={row.key}
-                    className="flex min-h-[69px] items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 min-[375px]:min-h-[52px]"
+                    className={dc(
+                      "flex min-h-[69px] items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 min-[375px]:min-h-[52px]",
+                      "flex items-center justify-between gap-2 rounded-lg border border-line px-2 py-1",
+                    )}
                   >
-                    <div className="min-w-0">
-                      <div className="text-[12.5px] font-bold leading-snug">{row.name}</div>
-                      <div className="text-[11px] font-semibold text-graphite/45">
+                    <div className={cn("min-w-0", dense && "flex items-baseline gap-1.5")}>
+                      <div className={dc("text-[12.5px] font-bold leading-snug", "text-[11px] font-bold leading-tight")}>{row.name}</div>
+                      <div className={dc("text-[11px] font-semibold text-graphite/45", "text-[10px] font-semibold text-graphite/45 leading-tight")}>
                         {row.current.name}
                       </div>
                     </div>
@@ -1284,8 +1467,11 @@ export default function TestSidingCalculator({
                             disabled={unavailable}
                             onClick={() => row.choose(c.id)}
                             className={cn(
-                              "h-5 w-5 rounded-full border border-graphite/15 transition-transform min-[360px]:h-6 min-[360px]:w-6",
-                              unavailable ? "cursor-not-allowed opacity-30" : active ? "scale-110 ring-[3px] ring-pro" : "hover:scale-110",
+                              dc(
+                                "h-5 w-5 rounded-full border border-graphite/15 transition-transform min-[360px]:h-6 min-[360px]:w-6",
+                                "h-[18px] w-[18px] rounded-full border border-graphite/15 transition-transform",
+                              ),
+                              unavailable ? "cursor-not-allowed opacity-30" : active ? (dense ? "scale-110 ring-2 ring-pro" : "scale-110 ring-[3px] ring-pro") : "hover:scale-110",
                             )}
                             style={{ background: c.hex }}
                           />
@@ -1298,8 +1484,8 @@ export default function TestSidingCalculator({
             </div>
 
             {/* БЛОК: Ползунок и поле процентного запаса | ЗА ЧТО ОТВЕЧАЕТ: Добавляет выбранный процент запаса ко всем позициям таблицы | ОТКУДА ДАННЫЕ: input.sparePct | КАК ИЗМЕНИТЬ: Формула округления запаса задана в withSpare() в src/data/siding.ts */}
-            <div className="mt-6 border-t border-line pt-5">
-              <div className="text-[13px] font-bold text-graphite/70 mb-2 flex items-center gap-1.5">
+            <div className={dc("mt-6 border-t border-line pt-5", "mt-3 border-t border-line pt-3")}>
+              <div className={dc("mb-2 text-[13px]", "mb-1 text-[12px]") + " flex items-center gap-1.5 font-bold text-graphite/70"}>
                 <PackagePlus size={14} strokeWidth={2.4} className="text-graphite/40" />
                 Запас
               </div>
@@ -1330,29 +1516,44 @@ export default function TestSidingCalculator({
                   <span className="text-[13px] font-bold text-graphite/50">%</span>
                 </div>
               </div>
-              <div className="mt-2 text-[12px] text-graphite/50 font-medium">
+              <div className={dc("mt-2 text-[12px]", "mt-1 text-[11px]") + " font-medium text-graphite/50"}>
                 Добавляется к количеству всего рассчитываемого товара
               </div>
             </div>
           </motion.div>
 
           {/* БЛОК: Правая колонка — план фасада, список проёмов, раскрой и спецификация | ЗА ЧТО ОТВЕЧАЕТ: Показывает все результаты расчёта | ОТКУДА ДАННЫЕ: Объект calc из calcSiding() | КАК ИЗМЕНИТЬ: Каждый блок подписан ниже */}
-          <div className="min-w-0 space-y-5">
+          {/* Страница «Сайдинг»: одна правая колонка, как раньше. Страница «Тест» (features.stickyPlan): план стоит
+              в своей ячейке во всю высоту левой колонки и закрепляется под шапкой, а «Раскрой панелей»,
+              «Итого материалы» и «Спецификация» идут ниже на всю ширину, чтобы не наезжать на закреплённый план */}
+          <OptionalDiv when={!features.stickyPlan} className="min-w-0 space-y-5">
+          <OptionalDiv when={features.stickyPlan} className="min-w-0 lg:self-stretch">
+          <OptionalDiv
+            when={features.stickyPlan}
+            className={cn("plan-sticky thin-scroll", dc("space-y-5", "space-y-3"))}
+            style={{ "--plan-sticky-top": `${planStickyTop}px` } as CSSProperties}
+          >
             {/* БЛОК: Карточка «План фасада» с печатью, кликом на весь экран и списком проёмов | ЗА ЧТО ОТВЕЧАЕТ: Рисует схему стены и выводит под ней точные размеры и отступы всех проёмов от четырёх краёв фасада | ОТКУДА ДАННЫЕ: FacadeScheme и calc.openings | КАК ИЗМЕНИТЬ: Печатный шаблон настраивается в src/utils/printSidingLayout.ts */}
             <motion.div
               initial={{ opacity: 0, y: 26 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, delay: 0.1, ease }}
             >
-              <div className="overflow-hidden rounded-2xl border border-line bg-white">
-                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-2.5 lg:px-5">
+              <div
+                className={cn(
+                  "overflow-hidden rounded-2xl border border-line bg-white",
+                  features.stickyPlan && "plan-sticky-card thin-scroll",
+                )}
+                data-testid="facade-plan-card"
+              >
+                <div className={dc("gap-x-4 gap-y-2 border-b border-line px-4 py-2.5 lg:px-5", "gap-x-3 gap-y-1 border-b border-line px-3 py-1.5") + " flex flex-wrap items-center justify-between"}>
                   <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 text-[13px] font-extrabold">
+                    <div className={dc("text-[13px]", "text-[12px]") + " flex items-center gap-2 font-extrabold"}>
                       <LayoutGrid size={15} strokeWidth={2.3} className="text-graphite/50" />
                       План фасада
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] font-semibold text-graphite/55">
+                  <div className={dc("gap-x-4 gap-y-1.5 text-[11.5px]", "gap-x-2.5 gap-y-1 text-[10.5px]") + " flex flex-wrap items-center font-semibold text-graphite/55"}>
                     <span className="flex items-center gap-1.5">
                       <span className="h-2.5 w-4 rounded-sm border" style={{ background: color.scheme.trim, borderColor: color.scheme.trimEdge }} /> стартовая планка
                     </span>
@@ -1374,12 +1575,15 @@ export default function TestSidingCalculator({
                   </div>
                 </div>
 
-                {/* БЛОК: Смещение H-профиля | ЗА ЧТО ОТВЕЧАЕТ: Четыре независимых варианта, активен ровно один:
-                    «Самый выгодный» (автоподбор), «Симметрично» (зеркально), «Слева»/«Справа» (целые планки от края) */}
+                {/* БЛОК: Смещение H-профиля | ЗА ЧТО ОТВЕЧАЕТ: Независимые варианты, активен ровно один:
+                    «Самый выгодный» (автоподбор), «Симметрично» (зеркально), «Слева»/«Справа» (целые планки от края);
+                    на странице «Тест» после «Симметрично» есть ещё «От центра» (H-профиль ровно по центру фасада) */}
                 <HProfilePlacementControl
                   value={facadeSettings.hPlacement}
                   seams={seamPositions}
                   onChange={setHPlacement}
+                  options={features.centerPlacement ? TEST_H_PROFILE_PLACEMENTS : undefined}
+                  dense={dense}
                 />
 
                 {planView !== "side1" && <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5 lg:px-5" role="tablist" aria-label="Вид дома">
@@ -1423,7 +1627,7 @@ export default function TestSidingCalculator({
                 {planView !== "side1" && <HouseRoofSelector dims={houseDims} onChange={setHouseDims} />}
 
                 {/* План фасада остаётся в разметке и в других видах (скрыт), чтобы кнопка «Печать» всегда печатала план */}
-                <div id="plan-panel-side1" role="region" aria-label={facadeLabel} className={cn("relative p-3", planView !== "side1" && "hidden")}>
+                <div id="plan-panel-side1" role="region" aria-label={facadeLabel} className={cn(dc("relative p-3", "relative p-2"), planView !== "side1" && "hidden")}>
                   <button
                     type="button"
                     onClick={() => setPlanZoomed(true)}
@@ -1432,8 +1636,8 @@ export default function TestSidingCalculator({
                     className="group/plan relative block w-full cursor-zoom-in overflow-x-auto text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pro"
                   >
                     {geometry
-                      ? <GableFacadeScheme calc={calc} input={input} geometry={geometry} seams={seamPositions} svgRef={svgRef} />
-                      : <FacadeScheme calc={calc} input={input} seams={seamPositions} svgRef={svgRef} />}
+                      ? <GableFacadeScheme calc={calc} input={input} geometry={geometry} seams={seamPositions} svgRef={svgRef} dense={dense} />
+                      : <FacadeScheme calc={calc} input={input} seams={seamPositions} svgRef={svgRef} dense={dense} />}
                     <PlanZoomHint className="group-hover/plan:opacity-100 group-focus-visible/plan:opacity-100" />
                   </button>
                 </div>
@@ -1493,7 +1697,7 @@ export default function TestSidingCalculator({
               </div>
             </motion.div>
 
-            {/* БЛОК: Ведомость «Раскрой панелей» со сворачиванием | ЗА ЧТО ОТВЕЧАЕТ: Перечисляет панели, обрезки которых использованы повторно; по умолчанию свёрнута, разворачивается кнопкой справа | ОТКУДА ДАННЫЕ: Массив calc.panelPlan из src/data/siding.ts | КАК ИЗМЕНИТЬ: Стартовое состояние задаётся в useState(false) у cutPlanOpen */}
+            {/* БЛОК: Ведомость «Раскрой панелей» со сворачиванием — расположена сразу под «Планом фасада» | ЗА ЧТО ОТВЕЧАЕТ: Перечисляет панели, обрезки которых использованы повторно; по умолчанию свёрнута, разворачивается кнопкой справа | ОТКУДА ДАННЫЕ: Массив calc.panelPlan из src/data/siding.ts | КАК ИЗМЕНИТЬ: Стартовое состояние задаётся в useState(false) у cutPlanOpen */}
             {(() => {
               const reusedCount = cuttingDetails.length;
               const wasteTotal = calc.panelPlan.reduce((sum, p) => sum + p.wasteMm, 0);
@@ -1503,17 +1707,19 @@ export default function TestSidingCalculator({
                   initial={{ opacity: 0, y: 26 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.7, delay: 0.12, ease }}
+                  data-testid="cutting-plan-card"
                   className="overflow-hidden rounded-2xl border border-line bg-white shadow-[0_2px_20px_rgba(20,25,27,0.04)]"
                 >
                   <div
                     className={cn(
-                      "flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 lg:px-5",
+                      "flex flex-wrap items-center justify-between gap-3",
+                      dc("px-4 py-3.5 lg:px-5", "px-3 py-2.5 lg:px-4"),
                       cutPlanOpen && "border-b border-line",
                     )}
                   >
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="text-[15px] font-extrabold">Раскрой панелей</div>
-                      <div className="text-[12px] font-semibold text-graphite/50">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <div className={dc("text-[15px] font-extrabold", "text-[13px] font-extrabold")}>Раскрой панелей</div>
+                      <div className={dc("text-[12px] font-semibold text-graphite/50", "text-[11.5px] font-semibold text-graphite/50")}>
                         обрезки {reusedCount} панелей использованы повторно · остаток всего {m2(wasteTotal / 1000)} м
                       </div>
                     </div>
@@ -1521,7 +1727,10 @@ export default function TestSidingCalculator({
                       type="button"
                       onClick={() => setCutPlanOpen((v) => !v)}
                       aria-expanded={cutPlanOpen}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-[12px] font-bold text-graphite/75 transition-colors hover:border-graphite/50 hover:bg-smoke"
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-lg border border-line bg-white font-bold text-graphite/75 transition-colors hover:border-graphite/50 hover:bg-smoke",
+                        dc("h-8 px-3 text-[12px]", "h-7 px-2.5 text-[11.5px]"),
+                      )}
                     >
                       {cutPlanOpen ? "Свернуть" : "Развернуть"}
                       <ChevronDown
@@ -1532,14 +1741,14 @@ export default function TestSidingCalculator({
                     </button>
                   </div>
                   {cutPlanOpen && (
-                    <div className="thin-scroll max-h-[260px] overflow-y-auto px-4 py-3 lg:px-5">
+                    <div className={cn("thin-scroll max-h-[240px] overflow-y-auto", dc("px-4 py-3 lg:px-5", "px-3 py-2.5 lg:px-4"))}>
                       <ul className="space-y-1.5">
                         {cuttingDetails.map((detail, index) => {
                           const separator = detail.indexOf(":");
                           const panelLabel = detail.slice(0, separator);
                           const description = detail.slice(separator + 1);
                           return (
-                            <li key={`cutting-${index}`} className="text-[12.5px] leading-relaxed text-graphite/70">
+                            <li key={`cutting-${index}`} className={dc("text-[12.5px] leading-relaxed text-graphite/70", "text-[12px] leading-relaxed text-graphite/70")}>
                               <b className="text-graphite">{panelLabel}:</b>{description}
                             </li>
                           );
@@ -1550,13 +1759,17 @@ export default function TestSidingCalculator({
                 </motion.div>
               );
             })()}
+          </OptionalDiv>
+          </OptionalDiv>
 
-            {/* БЛОК: Тёмная карточка «Итого материалы» — отдельным блоком между «Раскрой панелей» и «Спецификация материалов», как на странице «Грильято» | ОТКУДА ДАННЫЕ: specTotal и specRows */}
+          {/* Страница «Тест»: итог и спецификация отдельным блоком на всю ширину под калькулятором и планом */}
+          <OptionalDiv when={features.stickyPlan} id="calc-results" className={cn("min-w-0 scroll-mt-[152px] lg:col-span-2", dc("space-y-5", "space-y-3"))}>
+            {/* БЛОК: Тёмная карточка «Итого материалы» — отдельным блоком над «Спецификацией материалов», как на странице «Грильято» | ОТКУДА ДАННЫЕ: specTotal и specRows */}
             <motion.div
               initial={{ opacity: 0, y: 26 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, delay: 0.12, ease }}
-              className="relative overflow-hidden rounded-2xl bg-graphite p-5 text-white shadow-[0_16px_40px_rgba(20,25,27,0.35)]"
+              className={cn("relative overflow-hidden rounded-2xl bg-graphite text-white shadow-[0_16px_40px_rgba(20,25,27,0.35)]", dc("p-5", "p-4"))}
             >
               <div className="absolute -top-16 -right-16 h-48 w-48 rounded-full bg-pro/15 blur-2xl" />
               <div className="relative md:flex md:items-center md:justify-between md:gap-10">
@@ -1598,9 +1811,9 @@ export default function TestSidingCalculator({
               className="overflow-hidden rounded-2xl border border-line bg-white shadow-[0_2px_20px_rgba(20,25,27,0.04)]"
               data-testid={variant === "siding" ? "siding-facade-specification" : "test-facade-specification"}
             >
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-3.5 lg:px-5">
+              <div className={dc("gap-x-4 gap-y-2 border-b border-line px-4 py-3.5 lg:px-5", "gap-x-3 gap-y-1.5 border-b border-line px-3 py-2.5 lg:px-4") + " flex flex-wrap items-center justify-between"}>
                 <div className="flex flex-wrap items-center gap-2.5">
-                  <span className="text-[15px] font-extrabold">Спецификация материалов</span>
+                  <span className={dc("text-[15px]", "text-[13px]") + " font-extrabold"}>Спецификация материалов</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <button
@@ -1666,7 +1879,8 @@ export default function TestSidingCalculator({
                 </table>
               </div>
             </motion.div>
-          </div>
+          </OptionalDiv>
+          </OptionalDiv>
         </div>
       </div>
 

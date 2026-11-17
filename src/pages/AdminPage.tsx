@@ -1,9 +1,16 @@
 /* ============================================================================
  * ФАЙЛ: src/pages/AdminPage.tsx — Панель «Администрирование» (#/admin)
- * ЗА ЧТО ОТВЕЧАЕТ: Защищённая паролем страница управления сайтом: экран входа по паролю, сворачиваемый раздел «Настройка страниц» и панель синхронизации с Google-таблицей в «Общих параметрах сайта».
- * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Читает и публикует настройки через loadSettings(), publishSettings(), publishDefaultSettings() и useSettingsSync() из src/data/siteSettings.ts; параметры подключения к таблице — из src/data/settingsSync.ts.
+ * ЗА ЧТО ОТВЕЧАЕТ: Защищённая страница управления сайтом: экран входа по аккаунту Supabase,
+ *   сворачиваемый раздел «Настройка страниц» и панель синхронизации с Google-таблицей
+ *   в «Общих параметрах сайта».
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Вход и права проверяются по базе данных Supabase
+ *   (src/integrations/supabase/adminAuth.ts, таблица admins); настройки читаются и публикуются
+ *   через loadSettings(), publishSettings(), publishDefaultSettings() и useSettingsSync()
+ *   из src/data/siteSettings.ts; параметры подключения к таблице — из src/data/settingsSync.ts.
  * КАК ИЗМЕНИТЬ:
- *   — Чтобы сменить пароль входа в админку, измените константу ADMIN_PASSWORD ниже.
+ *   — Доступ выдаётся не паролем из кода, а аккаунтом в базе Supabase: создайте пользователя
+ *     в Authentication → Users и добавьте его почту в таблицу admins (инструкция — SUPABASE.md).
+ *   — Данные для подключения к базе вписываются в src/integrations/supabase/config.ts.
  *   — Чтобы добавить карточку новой страницы в «Карту страниц», допишите объект в массив PAGES.
  * ========================================================================= */
 
@@ -24,6 +31,7 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
+  FileQuestion,
   Gauge,
   KeyRound,
   Link2,
@@ -49,6 +57,7 @@ import {
   Warehouse,
 } from "lucide-react";
 import SiteFooter from "../components/SiteFooter";
+import { toHref } from "../utils/router";
 import {
   DEFAULT_SETTINGS,
   FOOTER_ICON_KEYS,
@@ -70,18 +79,37 @@ import {
 import { FOOTER_ICON_TITLES, FooterIcon } from "../components/FooterIcon";
 import { SETTINGS_SHEET, getApiConfig, setApiConfig } from "../data/settingsSync";
 import PageSettingsSection from "../components/admin/PageSettingsSection";
-import { isAdminUnlocked, lockAdmin, unlockAdmin } from "../utils/adminSession";
+import {
+  getAdminSessionInfo,
+  isAdminUnlocked,
+  lockAdmin,
+  subscribeAdminSession,
+} from "../utils/adminSession";
+import { signInAdmin } from "../integrations/supabase/adminAuth";
+import { describeSupabaseConfig } from "../integrations/supabase/config";
 import { cn } from "../utils/cn";
 
-/* БЛОК: Пароль входа в админку и ключ сессии вкладки (ADMIN_PASSWORD, SESSION_KEY)
- * ЗА ЧТО ОТВЕЧАЕТ: Задаёт секретный пароль для открытия панели управления и ключ в sessionStorage, чтобы не вводить пароль заново при обновлении текущей вкладки.
+/* БЛОК: Общие настройки анимации страницы (ease)
+ * ЗА ЧТО ОТВЕЧАЕТ: Задаёт плавность появления блоков админки.
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Прописано прямо здесь.
- * КАК ИЗМЕНИТЬ: Поменяйте строку "e2612s" в ADMIN_PASSWORD на любой свой пароль (если меняете и пароль записи в таблицу, обновите также TOKEN в scripts/settings-sheet-api.gs). */
+ * КАК ИЗМЕНИТЬ: Не требуется. Пароль входа больше не хранится в коде — он проверяется
+ *   по базе данных Supabase (src/integrations/supabase/adminAuth.ts). */
 const ease = [0.22, 1, 0.36, 1] as const;
 
-const ADMIN_PASSWORD = "e2612s";
-
 const fmtNum = (value: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(value);
+
+/* БЛОК: Подпись роли администратора в шапке панели (roleLabel)
+ * ЗА ЧТО ОТВЕЧАЕТ: Показывает роль по-русски: owner — «Владелец», admin — «Администратор», остальные роли выводятся как есть.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Поле role из таблицы admins базы Supabase.
+ * КАК ИЗМЕНИТЬ: Добавьте или переименуйте подписи в объекте ROLES ниже. */
+const ROLES: Record<string, string> = {
+  owner: "Владелец",
+  admin: "Администратор",
+};
+
+function roleLabel(role: string): string {
+  return ROLES[role] ?? role;
+}
 
 /* БЛОК: Сворачивание и разворачивание крупных разделов админки (useCollapsedSections, CollapseButton, Collapsible)
  * ЗА ЧТО ОТВЕЧАЕТ: Позволяет сворачивать разделы «Карта страниц», «Настройка страниц» и «Карта блоков» кнопкой справа от заголовка. По умолчанию все разделы свёрнуты; выбранное состояние запоминается между визитами.
@@ -131,7 +159,7 @@ interface PageItem {
 const PAGES: PageItem[] = [
   {
     title: "Главная страница",
-    route: "#/",
+    route: "/",
     category: "Главная",
     badge: "Витрина",
     description:
@@ -141,7 +169,7 @@ const PAGES: PageItem[] = [
   },
   {
     title: "Калькулятор · Грильято",
-    route: "#/grilyato",
+    route: "/grilyato",
     category: "Калькулятор",
     badge: "Потолок",
     description:
@@ -151,7 +179,7 @@ const PAGES: PageItem[] = [
   },
   {
     title: "Калькулятор · Армстронг",
-    route: "#/armstrong",
+    route: "/armstrong",
     category: "Калькулятор",
     badge: "Потолок",
     description:
@@ -161,7 +189,7 @@ const PAGES: PageItem[] = [
   },
   {
     title: "Кровля",
-    route: "#/roof",
+    route: "/roof",
     category: "Калькулятор",
     badge: "Кровля",
     description:
@@ -171,7 +199,7 @@ const PAGES: PageItem[] = [
   },
   {
     title: "Сайдинг",
-    route: "#/siding",
+    route: "/siding",
     category: "Калькулятор",
     badge: "Фасад",
     description:
@@ -181,7 +209,7 @@ const PAGES: PageItem[] = [
   },
   {
     title: "Тест",
-    route: "#/test",
+    route: "/test",
     category: "Системная",
     badge: "Тестовая",
     description:
@@ -190,8 +218,18 @@ const PAGES: PageItem[] = [
     details: ["Временная заглушка", "Калькулятор доступен на странице «Сайдинг»"],
   },
   {
+    title: "404",
+    route: "/404",
+    category: "Системная",
+    badge: "Ошибка",
+    description:
+      "Страница «404» показывается, когда адрес введён неверно. Содержит анимированный рисунок и кнопки возврата.",
+    icon: FileQuestion,
+    details: ["Анимированный рисунок", "Кнопки возврата", "Показывается при неверном адресе", "Настройка расстояния между логотипом и текстом"],
+  },
+  {
     title: "Администрирование",
-    route: "#/admin",
+    route: "/admin",
     category: "Системная",
     badge: "Карта сайта",
     description:
@@ -206,18 +244,25 @@ const PAGES: PageItem[] = [
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Сравнивает введённую строку с константой ADMIN_PASSWORD в начале файла.
  * КАК ИЗМЕНИТЬ: Сам пароль меняется в ADMIN_PASSWORD, а тексты заголовка и кнопки «Войти» — в разметке этого блока. */
 function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(false);
+  const [error, setError] = useState("");
   const [visible, setVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const db = describeSupabaseConfig();
 
-  const submit = (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (password === ADMIN_PASSWORD) {
-      unlockAdmin();
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    const result = await signInAdmin(email, password);
+    if (result.ok) {
       onUnlock();
       return;
     }
-    setError(true);
+    setBusy(false);
+    setError(result.error ?? "Не удалось войти");
   };
 
   return (
@@ -245,25 +290,56 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
               Администрирование
             </h1>
             <p className="mt-2 text-[14px] leading-relaxed text-white/60">
-              Раздел защищён паролем. Введите пароль, чтобы открыть карту страниц и настройки блоков.
+              Введите почту и пароль администратора.
             </p>
 
-            <form onSubmit={submit} className="mt-6 space-y-3">
-              <label className="block text-[12.5px] font-bold uppercase tracking-wider text-white/45">
-                Пароль
-              </label>
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
+            <form onSubmit={submit} className="mt-6 space-y-4">
+              <div className="space-y-2">
+                <label
+                  htmlFor="admin-email"
+                  className="block text-[12.5px] font-bold uppercase tracking-wider text-white/45"
+                >
+                  Электронная почта
+                </label>
+                <input
+                  id="admin-email"
+                  type="email"
+                  value={email}
+                  autoFocus
+                  autoComplete="username"
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (error) setError("");
+                  }}
+                  aria-label="Электронная почта"
+                  aria-invalid={Boolean(error)}
+                  placeholder="you@example.com"
+                  className={cn(
+                    "w-full rounded-xl border bg-white/[0.06] px-4 py-3 text-[15px] font-semibold text-white outline-none transition-colors placeholder:text-white/30",
+                    error ? "border-red-400/70" : "border-white/15 focus:border-pro",
+                  )}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="admin-password"
+                  className="block text-[12.5px] font-bold uppercase tracking-wider text-white/45"
+                >
+                  Пароль
+                </label>
+                <div className="relative">
                   <input
+                    id="admin-password"
                     type={visible ? "text" : "password"}
                     value={password}
-                    autoFocus
+                    autoComplete="current-password"
                     onChange={(e) => {
                       setPassword(e.target.value);
-                      if (error) setError(false);
+                      if (error) setError("");
                     }}
                     aria-label="Пароль"
-                    aria-invalid={error}
+                    aria-invalid={Boolean(error)}
                     placeholder="Введите пароль"
                     className={cn(
                       "w-full rounded-xl border bg-white/[0.06] px-4 py-3 pr-11 text-[15px] font-semibold text-white outline-none transition-colors placeholder:text-white/30",
@@ -279,28 +355,57 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
                     {visible ? <EyeOff size={16} strokeWidth={2.3} /> : <Eye size={16} strokeWidth={2.3} />}
                   </button>
                 </div>
-                <button
-                  type="submit"
-                  className="inline-flex h-[50px] items-center gap-2 rounded-xl bg-pro px-5 text-[14px] font-extrabold text-graphite transition-all hover:gap-3 hover:bg-pro-soft"
-                >
-                  Войти
-                  <ArrowRight size={16} strokeWidth={2.6} />
-                </button>
               </div>
+
+              <button
+                type="submit"
+                disabled={busy}
+                className="inline-flex h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-pro px-5 text-[14px] font-extrabold text-graphite transition-all hover:gap-3 hover:bg-pro-soft disabled:cursor-wait disabled:opacity-70"
+              >
+                {busy ? (
+                  <>
+                    <Loader2 size={16} strokeWidth={2.6} className="animate-spin" />
+                    Проверяем доступ…
+                  </>
+                ) : (
+                  <>
+                    Войти
+                    <ArrowRight size={16} strokeWidth={2.6} />
+                  </>
+                )}
+              </button>
 
               {error && (
                 <div
                   role="alert"
-                  className="flex items-center gap-2 rounded-xl border border-red-400/40 bg-red-500/15 px-4 py-3 text-[14px] font-bold text-red-200"
+                  className="flex items-start gap-2 rounded-xl border border-red-400/40 bg-red-500/15 px-4 py-3 text-[14px] font-bold leading-relaxed text-red-200"
                 >
-                  <ShieldCheck size={16} strokeWidth={2.4} />
-                  Доступ запрещен
+                  <ShieldCheck size={16} strokeWidth={2.4} className="mt-0.5 shrink-0" />
+                  <span>
+                    <span className="block">Доступ запрещён</span>
+                    <span className="mt-0.5 block font-medium text-red-200/80">{error}</span>
+                  </span>
                 </div>
               )}
             </form>
 
+            <div
+              className={cn(
+                "mt-5 flex items-start gap-2.5 rounded-xl border px-4 py-3 text-[12.5px] font-medium leading-relaxed",
+                db.configured
+                  ? "border-white/10 bg-white/[0.03] text-white/55"
+                  : "border-pro/30 bg-pro/10 text-pro",
+              )}
+            >
+              <Cloud size={15} strokeWidth={2.3} className="mt-0.5 shrink-0" />
+              <span>
+                <span className="block font-bold">{db.label}</span>
+                {db.detail && <span className="mt-0.5 block opacity-80">{db.detail}</span>}
+              </span>
+            </div>
+
             <a
-              href="#/"
+              href={toHref("/")}
               className="mt-6 inline-flex items-center gap-1.5 text-[13px] font-bold text-white/55 transition-colors hover:text-pro"
             >
               Вернуться на главную
@@ -850,7 +955,7 @@ export function FooterEditor({
                     value={item.href}
                     onChange={(value) => patchLink(item.id, { href: value })}
                     ariaLabel={`Адрес ссылки ${index + 1}`}
-                    placeholder="#/grilyato или https://…"
+                    placeholder="/grilyato или https://…"
                     maxLength={400}
                     className="text-[12px] font-semibold text-graphite/65"
                   />
@@ -861,7 +966,7 @@ export function FooterEditor({
                         внешний сайт — откроется в новой вкладке
                       </>
                     ) : (
-                      <>страница сайта — адрес вида #/grilyato или #/armstrong#calc</>
+                      <>страница сайта — адрес вида /grilyato или /armstrong#calc</>
                     )}
                   </div>
                 </div>
@@ -875,7 +980,7 @@ export function FooterEditor({
               patchFooter({
                 links: [
                   ...links,
-                  { id: `f-${Date.now()}`, label: "Новая ссылка", href: "#/", enabled: true },
+                  { id: `f-${Date.now()}`, label: "Новая ссылка", href: "/", enabled: true },
                 ],
               })
             }
@@ -1430,7 +1535,7 @@ function SyncPanel({
               value={draftToken}
               onChange={(e) => setDraftToken(e.target.value)}
               type="password"
-              placeholder="e2612s"
+              placeholder="Пароль записи из Apps Script"
               className="mt-1.5 w-full rounded-lg border border-transparent bg-smoke px-3 py-2 text-[13px] font-semibold outline-none transition-colors focus:border-pro"
             />
           </div>
@@ -1475,6 +1580,7 @@ function SyncPanel({
  * КАК ИЗМЕНИТЬ: Все тексты разделов и кнопок сохранения редактируются в соответствующих JSX-блоках ниже. */
 export default function AdminPage() {
   const [unlocked, setUnlocked] = useState(isAdminUnlocked);
+  const [session, setSession] = useState(() => getAdminSessionInfo());
 
   const [settings, setSettings] = useState<SiteSettings>(loadSettings);
   const [dirty, setDirty] = useState(false);
@@ -1483,6 +1589,20 @@ export default function AdminPage() {
 
   const sync = useSettingsSync();
   const sections = useCollapsedSections();
+
+  /* БЛОК: Слежение за входом в панель (unlocked, session)
+   * ЗА ЧТО ОТВЕЧАЕТ: Открывает панель после успешного входа через Supabase, показывает почту и роль
+   *   вошедшего администратора и закрывает панель после выхода из аккаунта.
+   * ОТКУДА БЕРЁТ ИНФОРМАЦИЯ: src/utils/adminSession.ts (данные из базы Supabase).
+   * КАК ИЗМЕНИТЬ: Не требуется. */
+  useEffect(() => {
+    setUnlocked(isAdminUnlocked());
+    setSession(getAdminSessionInfo());
+    return subscribeAdminSession(() => {
+      setUnlocked(isAdminUnlocked());
+      setSession(getAdminSessionInfo());
+    });
+  }, []);
 
   useEffect(() => {
     if (!dirty) return;
@@ -1589,10 +1709,30 @@ export default function AdminPage() {
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, ease }}
-              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-[13px] font-semibold text-white/85 backdrop-blur"
+              className="flex flex-col items-start gap-3"
             >
-              <ShieldCheck size={14} className="text-pro" />
-              Панель управления проектом
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-[13px] font-semibold text-white/85 backdrop-blur">
+                  <ShieldCheck size={14} className="text-pro" />
+                  Панель управления проектом
+                </div>
+                {session && (
+                  <div className="inline-flex items-center gap-2 rounded-full border border-pro/30 bg-pro/10 px-4 py-1.5 text-[13px] font-semibold text-pro">
+                    <Users size={14} strokeWidth={2.4} />
+                    {session.email}
+                    <span className="rounded-full bg-pro/25 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-graphite">
+                      {roleLabel(session.role)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {session?.warning && (
+                <div className="flex max-w-2xl items-start gap-2 rounded-xl border border-pro/30 bg-pro/10 px-4 py-3 text-[12.5px] font-medium leading-relaxed text-pro">
+                  <AlertTriangle size={15} strokeWidth={2.3} className="mt-0.5 shrink-0" />
+                  {session.warning}
+                </div>
+              )}
             </motion.div>
 
             <button
@@ -1655,7 +1795,7 @@ export default function AdminPage() {
             className="mt-5 flex flex-wrap gap-3"
           >
             <a
-              href="#/admin#page-settings"
+              href={toHref("/admin#page-settings")}
               className="group inline-flex h-[46px] items-center gap-2 rounded-2xl bg-pro px-6 text-[14px] font-extrabold text-graphite transition-all hover:gap-3 hover:bg-pro-soft"
             >
               Настройка страниц

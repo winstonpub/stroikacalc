@@ -248,6 +248,56 @@ input.no-spin {
   animation: scheme-in 0.28s ease-out both;
 }
 
+/* БЛОК: Закреплённый «План фасада» на странице «Тест» (.plan-sticky, .plan-sticky-card)
+ * ЗА ЧТО ОТВЕЧАЕТ: На широких экранах (от 1024 px, где калькулятор стоит в две колонки) план фасада при прокрутке
+ *   останавливается под шапкой и остаётся на виду, пока листается левая колонка с настройками. Чтобы план целиком
+ *   помещался на экране, чертёж ограничен по высоте, а при нехватке места внутри карточки появляется своя прокрутка.
+ *   На телефонах и узких экранах (одна колонка) план не закрепляется.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Отступ от верха экрана --plan-sticky-top (высота шапки + зазор) передаёт
+ *   src/components/TestSidingCalculator.tsx.
+ * КАК ИЗМЕНИТЬ: Запас под заголовок и кнопки карточки — число 200px; наименьшая высота чертежа — 240px. */
+/* БЛОК: Уплотнённая таблица спецификации в компактном виде (.calc-dense)
+ * ЗА ЧТО ОТВЕЧАЕТ: В компактном виде строки сметы тоньше, поэтому на экране помещается больше позиций.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Класс calc-dense ставится на секцию калькулятора в
+ *   src/components/TestSidingCalculator.tsx, когда на странице «Тест» выбран компактный вид.
+ * КАК ИЗМЕНИТЬ: Высота строки — значения padding-top / padding-bottom ниже. */
+.calc-dense [data-testid$="facade-specification"] th,
+.calc-dense [data-testid$="facade-specification"] td {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+/* БЛОК: Анимированный рисунок страницы «404» (.nf-art)
+ * ЗА ЧТО ОТВЕЧАЕТ: Растягивает SVG-рисунок по ширине блока и убирает лишние отступы снизу.
+ *   Внутри SVG свои @keyframes (reveal, trace, rise, widen, extend, pop, guides); их этапы считаются
+ *   от общего времени цикла через CSS-переменную --nf-cycle.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: SVG вставляется в src/pages/NotFoundPage.tsx, который задаёт --nf-cycle.
+ * КАК ИЗМЕНИТЬ: Ширину блока задаёт константа NF_ART_MAX_WIDTH в src/pages/NotFoundPage.tsx. */
+.nf-art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Компактные таблицы калькуляторов Грильято, Армстронга и Кровли: строки тоньше, как на «Сайдинге» */
+.calc-dense table th,
+.calc-dense table td {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+@media (min-width: 1024px) {
+  .plan-sticky {
+    position: sticky;
+    top: var(--plan-sticky-top, 152px);
+    max-height: calc(100vh - var(--plan-sticky-top, 152px) - 12px);
+    overflow-y: auto;
+  }
+  .plan-sticky-card #plan-panel-side1 svg {
+    max-height: max(220px, calc(100vh - var(--plan-sticky-top, 152px) - 240px));
+  }
+}
+
 /* БЛОК: Правила печати страниц спецификаций на один лист A4 (@media print)
  * ЗА ЧТО ОТВЕЧАЕТ: Скрывает шапку, подвал, кнопки и браузерные колонтитулы при печати из калькуляторов, оставляя на листе A4 только параметры и таблицу сметы.
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Срабатывает автоматически, когда хук src/utils/pagePrint.ts добавляет класс spec-print-active на тег <body>.

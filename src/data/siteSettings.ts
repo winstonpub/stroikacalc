@@ -2,10 +2,11 @@
  * ФАЙЛ: src/data/siteSettings.ts — Настройки шапки, подвала и готовых размеров листа
  * ЗА ЧТО ОТВЕЧАЕТ: Хранит заводские настройки управляемых блоков сайта (бегущая строка, выпадающий список «Калькуляторы», колонки подвала сайта и кнопки готовых размеров кровельного листа), синхронизирует их с Google-таблицей и раздаёт всем страницам.
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Заводские значения берутся из DEFAULT_SETTINGS ниже и контактов STORE из src/data/grilyato.ts; актуальные опубликованные настройки подтягиваются из Google-таблицы через src/data/settingsSync.ts и кэшируются в localStorage.
- * КАК ИЗМЕНИТЬ: Все эти блоки удобнее всего редактировать без кода прямо на странице «Администрирование» (#/admin). Если нужно поменять заводские значения «по умолчанию» (к которым возвращает кнопка «Сбросить к исходным»), отредактируйте объект DEFAULT_SETTINGS ниже.
+ * КАК ИЗМЕНИТЬ: Все эти блоки удобнее всего редактировать без кода прямо на странице «Администрирование» (/admin). Если нужно поменять заводские значения «по умолчанию» (к которым возвращает кнопка «Сбросить к исходным»), отредактируйте объект DEFAULT_SETTINGS ниже.
  * ========================================================================= */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { normalizeInternalHref } from "../utils/router";
 import { STORE } from "./grilyato";
 import { SIDING_COLORS } from "./siding";
 import {
@@ -157,12 +158,36 @@ export interface LogoSettings {
   favicon: FaviconSettings;
 }
 export const LOGO_HEIGHT_MIN = 24;
-export const LOGO_HEIGHT_MAX = 64;
+export const LOGO_HEIGHT_MAX = 88;
+export const LOGO_FOOTER_HEIGHT_MIN = 48;
+export const LOGO_FOOTER_HEIGHT_MAX = 200;
 export const LOGO_OFFSET_MAX = 60;
 
 export const CALC_SIZE_MIN = 0.1;
 export const CALC_SIZE_MAX = 100;
 export const CALC_SPARE_MAX = 50;
+
+/** Видимость блоков «О …» под калькуляторами. Общая настройка: одинаковая для всех посетителей. */
+export interface AboutVisibility {
+  grilyato: boolean;
+  armstrong: boolean;
+  roof: boolean;
+  siding: boolean;
+}
+
+/* БЛОК: Настройки страницы «404» (NotFoundSettings, NOT_FOUND_GAP_MIN / MAX / DEFAULT)
+ * ЗА ЧТО ОТВЕЧАЕТ: Хранит расстояние между анимированным логотипом и текстом «Страница не найдена» с кнопкой.
+ *   Расстояние считается от нижнего края цифр «404» до блока с заголовком, в пикселях.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Значение задаётся в админке: «Блоки и наполнение страниц сайта» → «404».
+ * КАК ИЗМЕНИТЬ: NOT_FOUND_GAP_DEFAULT — расстояние по умолчанию, NOT_FOUND_GAP_MIN и NOT_FOUND_GAP_MAX —
+ *   границы ползунка в админке. */
+export interface NotFoundSettings {
+  /** Расстояние между логотипом с анимацией и текстом ниже, px */
+  logoGap: number;
+}
+export const NOT_FOUND_GAP_MIN = 0;
+export const NOT_FOUND_GAP_MAX = 200;
+export const NOT_FOUND_GAP_DEFAULT = 70;
 
 export interface SiteSettings {
   ticker: {
@@ -190,7 +215,12 @@ export interface SiteSettings {
   };
   /** Логотипы в шапке и подвале */
   logo: LogoSettings;
+  /** Показ блоков «О …» на страницах калькуляторов (общая настройка для всех посетителей) */
+  aboutVisible: AboutVisibility;
+  /** Страница «404»: расстояние между логотипом и текстом */
+  notFound: NotFoundSettings;
   defaultsVersion?: number;
+  logoVersion?: number;
   knownSheetIds?: string[];
   knownMenuIds?: string[];
   knownFooterLinkIds?: string[];
@@ -204,7 +234,7 @@ const LEGACY_MENU_IDS = ["m-grilyato", "m-armstrong", "m-roof", "m-test", "m-sme
 
 /** Кнопка «Администрирование» скрыта из выпадающего списка шапки. */
 const HIDDEN_MENU_IDS = ["m-admin", "m-smeta-test"];
-const HIDDEN_MENU_HREFS = ["#/admin", "#/smeta-test"];
+const HIDDEN_MENU_HREFS = ["/admin", "/smeta-test"];
 
 export const TICKER_SPEED_MIN = 1;
 export const TICKER_SPEED_MAX = 60;
@@ -233,26 +263,27 @@ export const DEFAULT_SETTINGS: SiteSettings = {
     garland: true,
     snow: true,
     items: [
-      { id: "t1", text: "Лемана Про Челябинск — Подвесные потолки", enabled: true },
+      { id: "t1", text: "Челябинск Стройка — Калькуляторы", enabled: true },
       { id: "t2", text: "Точная смета за 1 минуту", enabled: true },
       { id: "t3", text: "Доставка от 3х дней", enabled: true },
     ],
   },
   menu: [
-    { id: "m-grilyato", label: "Грильято", href: "#/grilyato", enabled: true },
-    { id: "m-armstrong", label: "Армстронг", href: "#/armstrong", enabled: true },
-    { id: "m-roof", label: "Кровля", href: "#/roof", enabled: true },
-    { id: "m-siding", label: "Сайдинг", href: "#/siding", enabled: true },
-    { id: "m-test", label: "Тест", href: "#/test", enabled: true },
+    { id: "m-grilyato", label: "Грильято", href: "/grilyato", enabled: true },
+    { id: "m-armstrong", label: "Армстронг", href: "/armstrong", enabled: true },
+    { id: "m-roof", label: "Кровля", href: "/roof", enabled: true },
+    { id: "m-siding", label: "Сайдинг", href: "/siding", enabled: true },
+    { id: "m-test", label: "Тест", href: "/test", enabled: true },
+    { id: "m-404", label: "404", href: "/404", enabled: true },
   ],
   footer: {
     calculatorsTitle: "Калькуляторы",
     storeTitle: "Магазин",
     links: [
-      { id: "f-grilyato", label: "Грильято", href: "#/grilyato", enabled: true },
-      { id: "f-armstrong", label: "Армстронг", href: "#/armstrong", enabled: true },
-      { id: "f-roof", label: "Кровля", href: "#/roof", enabled: true },
-      { id: "f-siding", label: "Сайдинг", href: "#/siding", enabled: true },
+      { id: "f-grilyato", label: "Грильято", href: "/grilyato", enabled: true },
+      { id: "f-armstrong", label: "Армстронг", href: "/armstrong", enabled: true },
+      { id: "f-roof", label: "Кровля", href: "/roof", enabled: true },
+      { id: "f-siding", label: "Сайдинг", href: "/siding", enabled: true },
     ],
     info: [
       { id: "f-address", text: STORE.fullAddress, icon: "pin", enabled: true },
@@ -362,11 +393,14 @@ export const DEFAULT_SETTINGS: SiteSettings = {
     },
   },
   logo: {
-    header: { visible: true, height: 56, align: "left", offsetX: 0, offsetY: 0, cityColor: "#FFFFFF" },
-    footer: { visible: true, height: 56, align: "left", offsetX: 0, offsetY: 0, cityColor: "#FFFFFF" },
+    header: { visible: true, height: 60, align: "left", offsetX: 0, offsetY: 0, cityColor: "#FFFFFF" },
+    footer: { visible: true, height: 100, align: "left", offsetX: 0, offsetY: 0, cityColor: "#FFFFFF" },
     favicon: { background: "#20282B", color: "#FFBF2F", radius: 7 },
   },
+  aboutVisible: { grilyato: true, armstrong: true, roof: true, siding: true },
+  notFound: { logoGap: NOT_FOUND_GAP_DEFAULT },
   defaultsVersion: 2,
+  logoVersion: 3,
 };
 
 /* БЛОК: Проверка, очистка и совместимость настроек со старыми версиями (sanitize)
@@ -411,7 +445,7 @@ function sanitize(raw: Partial<SiteSettings> | null): SiteSettings {
     .map((item, index) => ({
       id: str(item.id, `m-${index}`),
       label: str(item.label, ""),
-      href: str(item.href, "#/"),
+      href: normalizeInternalHref(str(item.href, "/")),
       enabled: item.enabled !== false,
       onHome: item.onHome !== false,
     }))
@@ -443,7 +477,7 @@ function sanitize(raw: Partial<SiteSettings> | null): SiteSettings {
     .map((item, index) => ({
       id: str(item.id, `f-${index}`),
       label: str(item.label, "").slice(0, 60),
-      href: str(item.href, "#/").slice(0, 400),
+      href: normalizeInternalHref(str(item.href, "/").slice(0, 400)),
       enabled: item.enabled !== false,
     }))
     .filter((item) => item.label.length > 0);
@@ -506,8 +540,6 @@ function sanitize(raw: Partial<SiteSettings> | null): SiteSettings {
   };
   const edge = (v: unknown, fallback: SidingEdgeDefault): SidingEdgeDefault =>
     v === "j" || v === "inner" || v === "outer" ? v : fallback;
-  const color = (v: unknown, fallback: string) =>
-    typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
   const hasV2Defaults = typeof raw.defaultsVersion === "number" && raw.defaultsVersion >= 2;
   const rr = rawCalc("roof");
   const br = base.calculators.roof;
@@ -572,19 +604,51 @@ function sanitize(raw: Partial<SiteSettings> | null): SiteSettings {
         cityColor: d.cityColor,
       };
     }
+    const hasV3Logo = typeof raw.logoVersion === "number" && raw.logoVersion >= 3;
+    const isFooter = d === base.logo.footer;
+    const minH = isFooter ? LOGO_FOOTER_HEIGHT_MIN : LOGO_HEIGHT_MIN;
+    const maxH = isFooter ? LOGO_FOOTER_HEIGHT_MAX : LOGO_HEIGHT_MAX;
     return {
       visible: typeof o.visible === "boolean" ? o.visible : d.visible,
-      height: num(o.height, d.height, LOGO_HEIGHT_MIN, LOGO_HEIGHT_MAX, 0),
+      height: hasV3Logo ? num(o.height, d.height, minH, maxH, 0) : d.height,
       align: o.align === "left" || o.align === "center" || o.align === "right" ? o.align : d.align,
-      offsetX: num(o.offsetX, d.offsetX, -LOGO_OFFSET_MAX, LOGO_OFFSET_MAX, 0),
-      offsetY: num(o.offsetY, d.offsetY, -LOGO_OFFSET_MAX, LOGO_OFFSET_MAX, 0),
-      cityColor: color(o.cityColor, d.cityColor),
+      offsetX: hasV3Logo ? num(o.offsetX, d.offsetX, -LOGO_OFFSET_MAX, LOGO_OFFSET_MAX, 0) : d.offsetX,
+      offsetY: hasV3Logo ? num(o.offsetY, d.offsetY, -LOGO_OFFSET_MAX, LOGO_OFFSET_MAX, 0) : d.offsetY,
+      cityColor: d.cityColor,
     };
   };
   const logoSettings: LogoSettings = {
     header: placement(rawLogo.header, base.logo.header),
     footer: placement(rawLogo.footer, base.logo.footer),
     favicon: base.logo.favicon,
+  };
+  /* БЛОК: Видимость блоков «О …» (aboutVisible)
+   * ЗА ЧТО ОТВЕЧАЕТ: Читает флаги показа блоков «О грильято», «О системе Армстронг», «О кровле» и «О сайдинге»
+   *   из общих настроек. Если флага нет (старые сохранённые версии настроек), блок показывается, как и раньше.
+   * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Поле aboutVisible из опубликованной Google-таблицы или из браузера.
+   * КАК ИЗМЕНИТЬ: Не требуется. Переключатели находятся в админке на карточках «Калькулятор · Грильято»,
+   *   «Калькулятор · Армстронг», «Кровля» и «Сайдинг». */
+  const rawAbout = (raw.aboutVisible && typeof raw.aboutVisible === "object" ? raw.aboutVisible : {}) as Partial<
+    Record<keyof AboutVisibility, unknown>
+  >;
+  const aboutFlag = (value: unknown): boolean => (typeof value === "boolean" ? value : true);
+  const aboutVisible: AboutVisibility = {
+    grilyato: aboutFlag(rawAbout.grilyato),
+    armstrong: aboutFlag(rawAbout.armstrong),
+    roof: aboutFlag(rawAbout.roof),
+    siding: aboutFlag(rawAbout.siding),
+  };
+
+  /* БЛОК: Настройки страницы «404» (notFound)
+   * ЗА ЧТО ОТВЕЧАЕТ: Читает расстояние между логотипом и текстом и удерживает его в допустимых границах.
+   *   Если значения нет (старые сохранённые версии настроек), берётся расстояние по умолчанию.
+   * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Поле notFound из опубликованной Google-таблицы или из браузера.
+   * КАК ИЗМЕНИТЬ: Не требуется. Ползунок находится в админке на карточке страницы «404». */
+  const rawNotFound = (raw.notFound && typeof raw.notFound === "object" ? raw.notFound : {}) as Partial<
+    Record<keyof NotFoundSettings, unknown>
+  >;
+  const notFound: NotFoundSettings = {
+    logoGap: num(rawNotFound.logoGap, base.notFound.logoGap, NOT_FOUND_GAP_MIN, NOT_FOUND_GAP_MAX, 0),
   };
 
   const rawCalculators =
@@ -678,7 +742,10 @@ function sanitize(raw: Partial<SiteSettings> | null): SiteSettings {
       siding: sidingSettings,
     },
     logo: logoSettings,
+    aboutVisible,
+    notFound,
     defaultsVersion: 2,
+    logoVersion: 3,
     knownSheetIds: Array.from(new Set([...known, ...defaultIds])),
     knownMenuIds: Array.from(new Set([...knownMenu, ...base.menu.map((item) => item.id)])),
     knownFooterLinkIds: Array.from(new Set([...knownFooterLinks, ...base.footer.links.map((item) => item.id)])),

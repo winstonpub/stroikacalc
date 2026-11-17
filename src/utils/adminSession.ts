@@ -1,50 +1,63 @@
 /* ============================================================================
  * ФАЙЛ: src/utils/adminSession.ts — Признак входа в панель «Администрирование»
- * ЗА ЧТО ОТВЕЧАЕТ: Хранит и сообщает всем частям сайта, что администратор уже вошёл в панель
- *   (введён пароль на странице #/admin). Благодаря этому шапка сайта может показать кнопку «Администрирование».
- * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Ключ "admin:unlocked" в sessionStorage браузера — сессия живёт до закрытия вкладки.
- * КАК ИЗМЕНИТЬ: Менять не требуется; пароль входа задаётся константой ADMIN_PASSWORD в src/pages/AdminPage.tsx.
+ * ЗА ЧТО ОТВЕЧАЕТ: Хранит и сообщает всем частям сайта, что администратор вошёл в панель.
+ *   Благодаря этому шапка сайта показывает кнопку «Администрирование» только владельцу сайта.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Вход проверяется по базе данных Supabase
+ *   (src/integrations/supabase/adminAuth.ts): почта, пароль и запись в таблице admins.
+ * КАК ИЗМЕНИТЬ: Доступ выдаётся не паролем из кода, а аккаунтом в Supabase.
+ *   Чтобы добавить администратора — создайте аккаунт в Supabase → Authentication → Users
+ *   и добавьте его почту в таблицу admins (подробнее — SUPABASE.md).
  * ========================================================================= */
 
-const ADMIN_SESSION_KEY = "admin:unlocked";
-const ADMIN_SESSION_EVENT = "admin:session-changed";
+import {
+  getAdminIdentity,
+  initAdminAuth,
+  signOutAdmin,
+  subscribeAdminIdentity,
+} from "../integrations/supabase/adminAuth";
 
 /* БЛОК: Проверка текущего состояния сессии (isAdminUnlocked)
- * ЗА ЧТО ОТВЕЧАЕТ: Возвращает true, если в этой вкладке администратор уже вошёл в панель управления.
- * ОТКУДА БЕРЁТ ИНФОРМАЦИЯ: Из sessionStorage по ключу "admin:unlocked".
+ * ЗА ЧТО ОТВЕЧАЕТ: Возвращает true, если в этом браузере администратор вошёл в панель управления.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Из проверенной сессии Supabase (src/integrations/supabase/adminAuth.ts).
  * КАК ИЗМЕНИТЬ: Не требует изменений. */
 export function isAdminUnlocked(): boolean {
-  try {
-    return sessionStorage.getItem(ADMIN_SESSION_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return getAdminIdentity() !== null;
+}
+
+/* БЛОК: Данные вошедшего администратора (getAdminSessionInfo)
+ * ЗА ЧТО ОТВЕЧАЕТ: Возвращает почту и роль вошедшего пользователя для показа в шапке админки.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Таблица admins базы Supabase.
+ * КАК ИЗМЕНИТЬ: Не требует изменений. */
+export function getAdminSessionInfo(): { email: string; role: string; warning?: string } | null {
+  return getAdminIdentity();
 }
 
 /* БЛОК: Вход и выход из панели (unlockAdmin, lockAdmin)
- * ЗА ЧТО ОТВЕЧАЕТ: Запоминает вход в панель управления и оповещает шапку сайта, либо стирает ключ при выходе.
- * ОТКУДА БЕРЁТ ИНФОРМАЦИЯ: Вызывается страницей «Администрирование» после проверки пароля или кнопкой «Заблокировать».
+ * ЗА ЧТО ОТВЕЧАЕТ: Фиксирует состояние входа и оповещает шапку сайта, чтобы кнопка
+ *   «Администрирование» появилась или скрылась без перезагрузки страницы.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Вход выполняется на странице #/admin через signInAdmin(),
+ *   выход — кнопкой «Заблокировать».
  * КАК ИЗМЕНИТЬ: Не требует изменений. */
 export function unlockAdmin(): void {
-  try {
-    sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
-  } catch {}
-  window.dispatchEvent(new Event(ADMIN_SESSION_EVENT));
+  // Вход подтверждает Supabase; отдельная разблокировка не нужна.
 }
 
 export function lockAdmin(): void {
-  try {
-    sessionStorage.removeItem(ADMIN_SESSION_KEY);
-  } catch {}
-  window.dispatchEvent(new Event(ADMIN_SESSION_EVENT));
+  void signOutAdmin();
 }
 
 /* БЛОК: Подписка на изменение состояния сессии (subscribeAdminSession)
- * ЗА ЧТО ОТВЕЧАЕТ: Позволяет шапке сайта мгновенно показать или скрыть кнопку «Администрирование»
- *   сразу после входа в панель или нажатия «Заблокировать», без перезагрузки страницы.
- * ОТКУДА БЕРЁТ ИНФОРМАЦИЯ: Событие "admin:session-changed" из unlockAdmin() / lockAdmin().
+ * ЗА ЧТО ОТВЕЧАЕТ: Позволяет шапке сайта мгновенно показать или скрыть кнопку «Администрирование».
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: События входа и выхода из src/integrations/supabase/adminAuth.ts.
  * КАК ИЗМЕНИТЬ: Не требует изменений. */
 export function subscribeAdminSession(listener: () => void): () => void {
-  window.addEventListener(ADMIN_SESSION_EVENT, listener);
-  return () => window.removeEventListener(ADMIN_SESSION_EVENT, listener);
+  return subscribeAdminIdentity(listener);
+}
+
+/* БЛОК: Запуск проверки входа при открытии сайта (initAdminSession)
+ * ЗА ЧТО ОТВЕЧАЕТ: Восстанавливает прежний вход администратора и следит за выходом из аккаунта.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Сохранённая сессия Supabase в браузере.
+ * КАК ИЗМЕНИТЬ: Вызывается один раз в src/main.tsx. */
+export function initAdminSession(): void {
+  initAdminAuth();
 }

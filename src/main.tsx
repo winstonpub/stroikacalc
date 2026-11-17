@@ -9,6 +9,14 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App";
+import { initAdminSession } from "./utils/adminSession";
+
+/* БЛОК: Восстановление входа администратора из базы Supabase
+ * ЗА ЧТО ОТВЕЧАЕТ: Если владелец сайта уже входил в этом браузере, панель «Администрирование»
+ *   открывается без повторного ввода почты и пароля.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Сохранённая сессия Supabase (src/integrations/supabase/adminAuth.ts).
+ * КАК ИЗМЕНИТЬ: Не требуется. */
+initAdminSession();
 
 /* БЛОК: Отрисовка сайта в браузере
  * ЗА ЧТО ОТВЕЧАЕТ: Находит контейнер <div id="root"> на странице и запускает внутри него всё приложение.

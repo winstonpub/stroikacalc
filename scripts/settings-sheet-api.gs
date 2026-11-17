@@ -15,7 +15,7 @@
 var SHEET_ID = '1vfnmGjg2_2KXQPcAfb4UKIwwi1FfewI1pwJ2hcTBaIg';
 var SHEET_GID = 2035849366;
 
-var TOKEN = 'e2612s';
+var TOKEN = 'ВАШ-НОВЫЙ-ПАРОЛЬ-ЗАПИСИ';
 
 var CHUNK_SIZE = 40000;
 

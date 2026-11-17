@@ -11,6 +11,7 @@ import {
   HANGERS, type CalcInput, type CalcResult, type GrilyatoColor, type SpecRow,
 } from "./grilyato";
 import type { PriceMap } from "./prices";
+import { assetUrl } from "../utils/router";
 
 const ceil = Math.ceil;
 const money = (v: number) => Math.round(v * 100) / 100;
@@ -19,7 +20,7 @@ const money = (v: number) => Math.round(v * 100) / 100;
  * ЗА ЧТО ОТВЕЧАЕТ: Задаёт кнопки выбора плиты в калькуляторе Армстронг, миниатюры с листанием фото и правила пересчёта площади в штуки или упаковки (packQty: 24 у Pharaon, 20 у Байкал и SO-DAE 7 мм, 16 у SO-DAE 10 мм).
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Фотографии лежат в папке public/images/armstrong/, цены подтягиваются по полю art из Google-таблицы.
  * КАК ИЗМЕНИТЬ: Положите новое фото в public/images/armstrong/ и пропишите его имя в image / gallery; поменяйте label (короткое имя на кнопке), name (полное имя в смете) или art (артикул). */
-const IMG = "images/armstrong/";
+const IMG = assetUrl("images/armstrong/");
 
 export interface ArmstrongTile {
   id: string;
@@ -35,7 +36,7 @@ export const DEFAULT_ARMSTRONG_TILE: ArmstrongTile = {
   id: "white-aluminum",
   label: "Белый алюминий",
   name: "Потолочная панель AP600A6 Tegular/Т-24 белый алюминий",
-  art: "12903346", image: `${IMG}tile-aluminum.webp`,
+  art: "12903346", image: `${IMG}tile-aluminum-1.webp`,
   gallery: [`${IMG}tile-aluminum-1.webp`, `${IMG}tile-aluminum-2.webp`],
 };
 
@@ -95,7 +96,7 @@ export function getArmstrongTile(id: string): ArmstrongTile {
 
 /* БЛОК: Варианты каркаса Т-профиля Т-24 (ARMSTRONG_PROFILES)
  * ЗА ЧТО ОТВЕЧАЕТ: Хранит серии «Премиум» и «Эконом» — у каждой серии сразу три артикула: несущая направляющая 3,7 м (main37), поперечная 1,2 м (cross12) и поперечная 0,6 м (cross06).
- * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Артикулы магазина Лемана Про Челябинск.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Артикулы магазина Челябинск Стройка.
  * КАК ИЗМЕНИТЬ: Поменяйте артикулы внутри объекта arts или подпись на кнопке в поле label. */
 export interface ArmstrongProfile {
   id: string;
@@ -125,7 +126,7 @@ export function getArmstrongProfile(id: string): ArmstrongProfile {
 
 /* БЛОК: Варианты пристенного периметрального угла 3 м (ARMSTRONG_ANGLES)
  * ЗА ЧТО ОТВЕЧАЕТ: Задаёт выбор стального или алюминиевого уголка 19×19×3000 мм по периметру комнаты.
- * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Артикулы магазина Лемана Про Челябинск.
+ * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Артикулы магазина Челябинск Стройка.
  * КАК ИЗМЕНИТЬ: Измените label (текст кнопки), name (название в смете) или art (артикул). */
 export interface ArmstrongAngle {
   id: string;

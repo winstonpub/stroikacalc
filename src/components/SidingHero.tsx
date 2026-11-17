@@ -8,6 +8,8 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Layers, Scissors, Truck } from "lucide-react";
 import { useChelyabinskDelivery } from "../hooks/useChelyabinskDelivery";
+import { useSiteSettings } from "../data/siteSettings";
+import { assetUrl, toHref } from "../utils/router";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 
@@ -15,15 +17,22 @@ const ease = [0.22, 1, 0.36, 1] as const;
  * ЗА ЧТО ОТВЕЧАЕТ: Выводит баннер раздела сайдинга и обновляет надпись «Сегодня»/«Завтра» по часам Челябинска.
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Хук useChelyabinskDelivery() и функция прокрутки onStart.
  * КАК ИЗМЕНИТЬ: Отредактируйте тексты в секциях ниже. */
-export default function SidingHero({ onStart }: { onStart: () => void }) {
+export default function SidingHero({
+  onStart,
+  featuresHref = "/siding#features",
+}: {
+  onStart: () => void;
+  featuresHref?: string;
+}) {
   const deliveryDay = useChelyabinskDelivery();
+  const aboutVisible = useSiteSettings().aboutVisible.siding;
 
   return (
     <section id="top" className="relative overflow-hidden bg-graphite text-white">
       {/* БЛОК: Фоновая фотография фасада и градиенты | ЗА ЧТО ОТВЕЧАЕТ: Визуальный фон под текстом баннера | ОТКУДА ДАННЫЕ: Файл public/images/siding-hero.jpg | КАК ИЗМЕНИТЬ: Замените изображение public/images/siding-hero.jpg или поменяйте путь в src */}
       <div className="absolute inset-0">
         <img
-          src="images/siding-hero.jpg"
+          src={assetUrl("images/siding-hero.jpg")}
           alt="Фасад из ПВХ сайдинга"
           className="h-full w-full object-cover opacity-45"
         />
@@ -70,12 +79,14 @@ export default function SidingHero({ onStart }: { onStart: () => void }) {
               Калькулятор
               <ArrowRight size={19} strokeWidth={2.6} className="transition-transform group-hover:translate-x-0.5" />
             </button>
-            <a
-              href="#/siding#features"
-              className="inline-flex h-[52px] items-center gap-2 rounded-2xl border border-white/20 px-6 text-[15px] font-bold text-white/85 transition-colors hover:bg-white/10 hover:text-white"
-            >
-              О сайдинге
-            </a>
+            {aboutVisible && (
+              <a
+                href={toHref(featuresHref)}
+                className="inline-flex h-[52px] items-center gap-2 rounded-2xl border border-white/20 px-6 text-[15px] font-bold text-white/85 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                О сайдинге
+              </a>
+            )}
           </motion.div>
         </div>
 

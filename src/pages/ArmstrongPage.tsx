@@ -14,6 +14,8 @@ import SiteFooter from "../components/SiteFooter";
 import Calculator from "../components/Calculator";
 import ArmstrongSystem from "../components/ArmstrongSystem";
 import { SPEC_PRICE_SHEET } from "../data/prices";
+import { useSiteSettings } from "../data/siteSettings";
+import { assetUrl, toHref } from "../utils/router";
 import { useChelyabinskDelivery } from "../hooks/useChelyabinskDelivery";
 
 const ease = [0.22, 1, 0.36, 1] as const;
@@ -24,6 +26,7 @@ const ease = [0.22, 1, 0.36, 1] as const;
  * КАК ИЗМЕНИТЬ: Править тексты баннера можно прямо внутри первой <section> ниже. */
 export default function ArmstrongPage() {
   const deliveryDay = useChelyabinskDelivery();
+  const { aboutVisible } = useSiteSettings();
 
   return (
     <>
@@ -31,7 +34,7 @@ export default function ArmstrongPage() {
       <section className="relative overflow-hidden bg-graphite text-white">
         <div className="absolute inset-0">
           <img
-            src="images/armstrong-hero.jpg"
+            src={assetUrl("images/armstrong-hero.jpg")}
             alt="Подвесной потолок Армстронг в современном офисе"
             className="w-full h-full object-cover opacity-45"
           />
@@ -69,18 +72,20 @@ export default function ArmstrongPage() {
               className="mt-8 flex flex-wrap items-center gap-3"
             >
               <a
-                href="#/armstrong#calc"
+                href={toHref("/armstrong#calc")}
                 className="group inline-flex items-center gap-2.5 h-[52px] px-7 rounded-2xl bg-pro text-graphite font-extrabold text-[15px] hover:bg-pro-soft transition-all hover:gap-4"
               >
                 Калькулятор
                 <ArrowRight size={19} strokeWidth={2.6} className="transition-transform group-hover:translate-x-0.5" />
               </a>
-              <a
-                href="#/armstrong#features"
-                className="inline-flex items-center gap-2 h-[52px] px-6 rounded-2xl border border-white/20 text-white/85 font-bold text-[15px] hover:bg-white/10 hover:text-white transition-colors"
-              >
-                О системе Армстронг
-              </a>
+              {aboutVisible.armstrong && (
+                <a
+                  href={toHref("/armstrong#features")}
+                  className="inline-flex items-center gap-2 h-[52px] px-6 rounded-2xl border border-white/20 text-white/85 font-bold text-[15px] hover:bg-white/10 hover:text-white transition-colors"
+                >
+                  О системе Армстронг
+                </a>
+              )}
             </motion.div>
           </div>
 
@@ -115,7 +120,7 @@ export default function ArmstrongPage() {
       />
 
       {/* БЛОК: Описание системы и подробные карточки плит, профилей и углов | ЗА ЧТО ОТВЕЧАЕТ: Раздел #features с карточками и кнопками быстрого выбора материала в калькулятор | ОТКУДА ДАННЫЕ: src/components/ArmstrongSystem.tsx | КАК ИЗМЕНИТЬ: Откройте src/components/ArmstrongSystem.tsx */}
-      <ArmstrongSystem />
+      {aboutVisible.armstrong && <ArmstrongSystem />}
 
       {/* БЛОК: Подвал сайта | ЗА ЧТО ОТВЕЧАЕТ: Логотип, ссылки, информация о магазине и кнопка «Настройка» | ОТКУДА ДАННЫЕ: src/components/SiteFooter.tsx | КАК ИЗМЕНИТЬ: В «Администрировании» (#/admin) */}
       <SiteFooter />

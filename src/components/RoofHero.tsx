@@ -8,6 +8,8 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Warehouse, Scissors, Truck } from "lucide-react";
 import { useChelyabinskDelivery } from "../hooks/useChelyabinskDelivery";
+import { useSiteSettings } from "../data/siteSettings";
+import { assetUrl, toHref } from "../utils/router";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 
@@ -16,6 +18,7 @@ const ease = [0.22, 1, 0.36, 1] as const;
  * ОТКУДА БЕРЁТ ИНФОРМАЦИЮ: Хук useChelyabinskDelivery() и проп onStart.
  * КАК ИЗМЕНИТЬ: Поменяйте тексты или фоновую картинку в соответствующих блоках ниже. */
 export default function RoofHero({ onStart }: { onStart: () => void }) {
+  const aboutVisible = useSiteSettings().aboutVisible.roof;
   const deliveryDay = useChelyabinskDelivery();
 
   return (
@@ -23,7 +26,7 @@ export default function RoofHero({ onStart }: { onStart: () => void }) {
       {/* БЛОК: Фоновое изображение и градиентное затемнение | ЗА ЧТО ОТВЕЧАЕТ: Подложка баннера кровли | ОТКУДА ДАННЫЕ: Файл public/images/roof-hero.jpg | КАК ИЗМЕНИТЬ: Замените путь в атрибуте src на своё фото кровли в папке public/images/ */}
       <div className="absolute inset-0">
         <img
-          src="images/roof-hero.jpg"
+          src={assetUrl("images/roof-hero.jpg")}
           alt="Кровельные системы и скатные крыши"
           className="h-full w-full object-cover opacity-45"
         />
@@ -69,12 +72,14 @@ export default function RoofHero({ onStart }: { onStart: () => void }) {
               Калькулятор
               <ArrowRight size={19} strokeWidth={2.6} className="transition-transform group-hover:translate-x-0.5" />
             </button>
-            <a
-              href="#/roof#features"
-              className="inline-flex h-[52px] items-center gap-2 rounded-2xl border border-white/20 px-6 text-[15px] font-bold text-white/85 transition-colors hover:bg-white/10 hover:text-white"
-            >
-              О кровле
-            </a>
+            {aboutVisible && (
+              <a
+                href={toHref("/roof#features")}
+                className="inline-flex h-[52px] items-center gap-2 rounded-2xl border border-white/20 px-6 text-[15px] font-bold text-white/85 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                О кровле
+              </a>
+            )}
           </motion.div>
         </div>
 
